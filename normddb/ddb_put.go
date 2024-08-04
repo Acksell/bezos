@@ -11,7 +11,7 @@ import (
 )
 
 // todo make private and only allow people to interact via indices?
-func NewPut(table TableDescription, key PrimaryKey, e DynamoEntity) *Put {
+func NewPut(table TableDefinition, key PrimaryKey, e DynamoEntity) *Put {
 	return &Put{
 		Table:  table,
 		Key:    key,

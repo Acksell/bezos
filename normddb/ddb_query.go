@@ -18,7 +18,7 @@ const (
 // 	ddb *dynamodbv2.Client
 // }
 
-// func NewGet(table TableDescription, pk PrimaryKey) *Getter {
+// func NewGet(table TableDefinition, pk PrimaryKey) *Getter {
 // 	return &Getter{
 // 		ddb: ddb,
 // 	}
@@ -38,7 +38,7 @@ const (
 // 	ddb *dynamodbv2.Client //? separate the client from this type and instead use different custom ddb client?
 // }
 
-// func NewQuery(table TableDescription, pk PrimaryKey) *Querier {
+// func NewQuery(table TableDefinition, pk PrimaryKey) *Querier {
 // 	return &Querier{
 // 		ddb: ddb,
 // 	}

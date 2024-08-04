@@ -17,7 +17,7 @@ type Action interface {
 }
 
 type Put struct {
-	Table  TableDescription
+	Table  TableDefinition
 	Index  Index
 	Entity DynamoEntity
 	Key    PrimaryKey
@@ -31,7 +31,7 @@ type Put struct {
 // check the invariants of the entity they're modifying. The safety of the
 // operation relies solely on the user doing careful validations before committing.
 type UnsafeUpdate struct {
-	Table  TableDescription
+	Table  TableDefinition
 	Key    PrimaryKey
 	Fields map[string]UpdateOp
 
@@ -43,7 +43,7 @@ type UnsafeUpdate struct {
 }
 
 type Delete struct {
-	Table TableDescription
+	Table TableDefinition
 	Key   PrimaryKey
 
 	c expression2.ConditionBuilder

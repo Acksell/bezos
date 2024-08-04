@@ -4,7 +4,7 @@ import "time"
 
 type IndexSpec struct {
 	Name            string
-	UnderlyingTable TableDescription
+	UnderlyingTable TableDefinition
 	// All entities put into this table get this TTL unless overridden by the Put operation.
 	// Zero duration means indefinite storage
 	DefaultTTL time.Duration

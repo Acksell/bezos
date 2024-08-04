@@ -1,6 +1,6 @@
 package normddb
 
-type TableDescription struct {
+type TableDefinition struct {
 	Name           string
 	KeyDefinitions PrimaryKeyDefinition
 	TimeToLiveKey  string
