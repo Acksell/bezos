@@ -1,12 +1,22 @@
 package normddb
 
-import "time"
+type TableDescription struct {
+	Name           string
+	KeyDefinitions PrimaryKeyDefinition
+	TimeToLiveKey  string
+	GSIKeys        []PrimaryKeyDefinition
 
-type MultiTableSetup struct {
+	// Optional field for registering entity schemas.
+	// Allows for validation of database operations.
+	// Entities map[string]EntitySchema
+	Indicies []Index
 }
 
-type SingleTableSetup struct {
-}
+// type MultiTableSetup struct {
+// }
+
+// type SingleTableSetup struct {
+// }
 
 // DynamoDB transactions can span multiple tables, but single-table designs are also common.
 // This interface is a way to abstract over the two different design patterns, and to standardize
@@ -71,20 +81,8 @@ type Index interface {
 	// ? The index should be an abstraction on top of this, so it should be both. The index/subtable knows about all GSI's, so it will generate GSIKeys method.
 	KeyFromEntity(DynamoEntity) PrimaryKey
 	NewPut(DynamoEntity) *Put
-	NewUpdate(PrimaryKey) *UnsafeUpdate
+	NewUnsafeUpdate(PrimaryKey) *UnsafeUpdate
 	NewDelete(PrimaryKey) *Delete
-}
-
-type IndexSpec struct {
-	Name            string
-	UnderlyingTable TableDescription
-	// All entities put into this table get this TTL unless overridden by the Put operation.
-	// Zero duration means indefinite storage
-	DefaultTTL time.Duration
-
-	Projections []ProjectionSpec
-	// Queries
-	// NewQuery(DynamoEntity) *Query
 }
 
 // type KeyStrategy string
@@ -106,18 +104,6 @@ type IndexSpec struct {
 // 	var idx Index
 // 	idx.NewPut().WithTTL()
 // }
-
-type TableDescription struct {
-	Name           string
-	KeyDefinitions PrimaryKeyDefinition
-	TimeToLiveKey  string
-	GSIKeys        []PrimaryKeyDefinition
-
-	// Optional field for registering entity schemas.
-	// Allows for validation of database operations.
-	// Entities map[string]EntitySchema
-	Indicies []Index
-}
 
 // type KeyPrefix struct {
 // 	PartitionKeyPrefix string
@@ -167,32 +153,6 @@ type TableDescription struct {
 // 	GlobalSecondaryIndex IndexType = "GSI"
 // 	LocalSecondaryIndex  IndexType = "LSI"
 // )
-
-// Projections are attached to an index where the source data is stored.
-// Initially we only implement eventually consistent projections, aka GSIs.
-// But some services use "consistent projections", this will be added later.
-type ProjectionSpec struct {
-	Name string
-	// Used for knowing the GSI's, and also for temporal logic checks warning of potential race conditions.
-	// When true, the index
-	EventuallyConsistent bool
-
-	// KeyNames defines the primary key of the new document stored.
-	KeyDefinitions PrimaryKeyDefinition
-
-	// todo: implement
-	Strategy ProjectionStrategy
-
-	Supports []QueryPattern
-}
-
-type ProjectionStrategy string
-
-const (
-	KEYS_ONLY ProjectionStrategy = "KEYS_ONLY"
-	INCLUDE   ProjectionStrategy = "INCLUDE"
-	ALL       ProjectionStrategy = "ALL"
-)
 
 /*
 Table:

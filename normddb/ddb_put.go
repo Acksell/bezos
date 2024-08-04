@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// todo, no need to recreate the old unsafe api, just use Index here. It's not circular to require the index.
+// todo make private and only allow people to interact via indices?
 func NewPut(table TableDescription, key PrimaryKey, e DynamoEntity) *Put {
 	return &Put{
 		Table:  table,
@@ -33,7 +33,7 @@ func (p *Put) WithTTL(expiry time.Time) *Put {
 }
 
 func (p *Put) WithCondition(c expression2.ConditionBuilder) *Put {
-	p.c = c
+	p.c = p.c.And(c)
 	return p
 }
 

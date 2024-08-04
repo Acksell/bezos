@@ -40,8 +40,8 @@ func (u *UnsafeUpdate) RefreshTTL(expiry time.Time) *UnsafeUpdate {
 	return u
 }
 
-func (u *UnsafeUpdate) WithCondition(ub expression2.UpdateBuilder) *UnsafeUpdate {
-	u.u = ub
+func (u *UnsafeUpdate) WithCondition(c expression2.ConditionBuilder) *UnsafeUpdate {
+	u.c = u.c.And(c)
 	return u
 }
 

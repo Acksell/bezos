@@ -40,15 +40,21 @@ type PrimaryKey struct {
 func (k PrimaryKey) DDB() map[string]types.AttributeValue {
 	pk, err := attributevalue.Marshal(k.Values.PartitionKey)
 	if err != nil {
-		panic(fmt.Sprintf("failed to marshal partition key of type %T with value %v: %w", k.Values.PartitionKey, k.Values.PartitionKey, err))
+		panic(fmt.Errorf("failed to marshal partition key of type %T with value %v: %w", k.Values.PartitionKey, k.Values.PartitionKey, err))
 	}
 	err = attributeMatchesDefinition(k.Definition.PartitionKey.Kind, pk)
+	if err != nil {
+		panic(fmt.Errorf("key kind does not match dynamo value: %w", err))
+	}
 
 	sk, err := attributevalue.Marshal(k.Values.PartitionKey)
 	if err != nil {
-		panic(fmt.Sprintf("failed to marshal sort key of type %T with value %v: %w", k.Values.PartitionKey, k.Values.PartitionKey, err))
+		panic(fmt.Errorf("failed to marshal sort key of type %T with value %v: %w", k.Values.PartitionKey, k.Values.PartitionKey, err))
 	}
 	err = attributeMatchesDefinition(k.Definition.SortKey.Kind, sk)
+	if err != nil {
+		panic(fmt.Errorf("key kind does not match dynamo value: %w", err))
+	}
 
 	return map[string]types.AttributeValue{
 		k.Definition.PartitionKey.Name: pk,
