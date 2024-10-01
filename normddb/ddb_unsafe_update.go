@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewUpdate(table TableDefinition, pk PrimaryKey) *UnsafeUpdate {
+func NewUnsafeUpdate(table TableDefinition, pk PrimaryKey) *UnsafeUpdate {
 	return &UnsafeUpdate{
 		Table: table,
 		Key:   pk,
@@ -49,8 +49,8 @@ func (u *UnsafeUpdate) WithCondition(c expression2.ConditionBuilder) *UnsafeUpda
 // However, it is recommended to use the methods provided by this package
 // to ensure that the update is idempotent and conforms to the schema.
 //
-// AddOp should be called after this method. If using AddOp and this method
-// there might be fields that conflict. This is not surfaced until the update is built.
+// Any AddOp calls should be made after this method. If you use AddOp together with this
+// there may be fields that conflict. This is not surfaced until the update is built.
 func (u *UnsafeUpdate) WithRawUpdate(up expression2.UpdateBuilder) *UnsafeUpdate {
 	if u.Fields != nil {
 		panic("cannot use WithRawUpdate after AddOp")
