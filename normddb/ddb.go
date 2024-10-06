@@ -63,33 +63,6 @@ type Tx struct {
 	// options TransactionOptions // todo
 }
 
-// IdempotencyTokens last for 10 minutes according to AWS documentation.
-// If used after that, the request will be treated as new.
-// Therefore, use with care.
-// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
-func (t *Tx) WithIdempotencyToken(token string) *Tx {
-	if t.stackCounter > 0 {
-		panic("cannot change idempotency token after transaction started")
-	}
-	t.idempotencyToken = token
-	return t
-}
-
-type TxFactory struct {
-	Client *dynamodbv2.Client
-}
-
-func (f *TxFactory) New() *Tx {
-	return NewTx(f.Client)
-}
-
-func NewTx(ddb *dynamodbv2.Client) *Tx {
-	return &Tx{
-		ddb:     ddb,
-		actions: make(map[PrimaryKey]Action),
-	}
-}
-
 func (t *Tx) Start(ctx context.Context) {
 	t.stackCounter++
 }
@@ -172,6 +145,18 @@ func (t *Tx) Commit(ctx context.Context) error {
 	return nil
 }
 
+// IdempotencyTokens last for 10 minutes according to AWS documentation.
+// If used after that, the request will be treated as new.
+// Therefore, use with care.
+// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
+func (t *Tx) WithIdempotencyToken(token string) *Tx {
+	if t.stackCounter > 0 {
+		panic("cannot change idempotency token after transaction started")
+	}
+	t.idempotencyToken = token
+	return t
+}
+
 // no point to extract into the interface and pollute the public interface. Doesn't save much readability.
 func toTransactWriteItem(action Action) (types.TransactWriteItem, error) {
 	switch a := action.(type) {
@@ -201,4 +186,19 @@ type DynamoEntity interface {
 
 	// Schema in order to validate that the field-specific operations are valid.
 	// Schema() EntitySchema
+}
+
+type TxFactory struct {
+	Client *dynamodbv2.Client
+}
+
+func (f *TxFactory) New() *Tx {
+	return NewTx(f.Client)
+}
+
+func NewTx(ddb *dynamodbv2.Client) *Tx {
+	return &Tx{
+		ddb:     ddb,
+		actions: make(map[PrimaryKey]Action),
+	}
 }
