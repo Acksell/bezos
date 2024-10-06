@@ -18,27 +18,7 @@ import (
 // 	DirectLookup           = "directLookup"
 // )
 
-type Getter struct {
-	ddb *dynamodbv2.Client
-}
-
-func NewGet(ddb *dynamodbv2.Client, table TableDefinition, pk PrimaryKey) *Getter {
-	return &Getter{
-		ddb: ddb,
-	}
-}
-
-func (g *Getter) Lookup(ctx context.Context) (DynamoEntity, error) {
-	//? implement this
-	return nil, nil
-}
-
-func (g *Getter) LookupMany(ctx context.Context) (DynamoEntity, error) {
-	//? implement this
-	return nil, nil
-}
-
-type Querier struct {
+type querier struct {
 	ddb *dynamodbv2.Client //? separate the client from this type and instead use different custom ddb client?
 
 	table   TableDefinition
@@ -79,8 +59,8 @@ func NewKeyCondition(partition any, strategy SortKeyStrategy) KeyCondition {
 // todo: replace TableDefinition argument with "Index" interface that has "Table()" method, and "IndexName()" method.
 // The base table can export methods like "Primary()", "GSI_1()" that return the index.
 // Then you can call them via "artifacts.Table.GSI_1()"
-func NewQuerier(ddb *dynamodbv2.Client, table TableDefinition, kc KeyCondition) *Querier {
-	return &Querier{
+func NewQuerier(ddb *dynamodbv2.Client, table TableDefinition, kc KeyCondition) *querier {
+	return &querier{
 		ddb:     ddb,
 		keyCond: kc,
 		opts: &queryOptions{
@@ -94,7 +74,7 @@ type QueryResult struct {
 	IsDone   bool
 }
 
-func (q *Querier) Next(ctx context.Context) (*QueryResult, error) {
+func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
 	b := expression2.NewBuilder()
 	key := expression2.KeyEqual(expression2.Key(q.table.KeyDefinitions.PartitionKey.Name), expression2.Value(q.keyCond.partition))
 	if q.keyCond.strategy != nil {
@@ -144,27 +124,29 @@ func (q *Querier) Next(ctx context.Context) (*QueryResult, error) {
 	}, nil
 }
 
-func (q *Querier) QueryAll(ctx context.Context) (*QueryResult, error) {
+func (q *querier) QueryAll(ctx context.Context) (*QueryResult, error) {
 	//? implement this
 	return nil, nil
 }
 
-func (q *Querier) WithEventuallyConsistentReads() *Querier {
+type QueryOption func(*queryOptions)
+
+func (q *querier) WithEventuallyConsistentReads() *querier {
 	q.opts.eventuallyConsistent = true
 	return q
 }
 
-func (q *Querier) WithDescending() *Querier {
+func (q *querier) WithDescending() *querier {
 	q.opts.descending = true
 	return q
 }
 
-func (q *Querier) WithPageSize(limit int) *Querier {
+func (q *querier) WithPageSize(limit int) *querier {
 	q.opts.pageSize = int32(limit)
 	return q
 }
 
-func (q *Querier) WithGSI(indexName string) *Querier {
+func (q *querier) WithGSI(indexName string) *querier {
 	q.opts.indexName = &indexName
 	return q
 }
@@ -173,7 +155,7 @@ func (q *Querier) WithGSI(indexName string) *Querier {
 //
 // todo queries on indices should pass entity filters by default to its query constructor
 // todo add more filters
-func (q *Querier) WithEntityFilter(typ string) *Querier {
+func (q *querier) WithEntityFilter(typ string) *querier {
 	q.opts.filter = q.opts.filter.And(expression2.Equal(expression2.Name("meta.type"), expression2.Value(typ)))
 	return q
 }
@@ -185,10 +167,13 @@ var Table = TableDefinition{
 		SortKey:      KeyDef{"sk", KeyKindS},
 	},
 	TimeToLiveKey: "ttl",
-	GSIKeys: []PrimaryKeyDefinition{
+	GSIs: []GSIDefinition{
 		{
-			PartitionKey: KeyDef{"gsi1pk", KeyKindS},
-			SortKey:      KeyDef{"gsi1sk", KeyKindS},
+			IndexName: "byName",
+			Key: PrimaryKeyDefinition{
+				PartitionKey: KeyDef{"pk", KeyKindS},
+				SortKey:      KeyDef{"name", KeyKindS},
+			},
 		},
 	},
 }
