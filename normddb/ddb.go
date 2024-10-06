@@ -17,8 +17,8 @@ type Action interface {
 }
 
 type Put struct {
-	Table  TableDefinition
-	Index  Index
+	Table TableDefinition
+	// Index  Index
 	Entity DynamoEntity
 	Key    PrimaryKey
 
@@ -49,7 +49,7 @@ type Delete struct {
 	c expression2.ConditionBuilder
 }
 
-type Transaction struct {
+type Tx struct {
 	ddb *dynamodbv2.Client //? separate the client from this type and instead use different custom ddb client?
 
 	idempotencyToken string
@@ -67,7 +67,7 @@ type Transaction struct {
 // If used after that, the request will be treated as new.
 // Therefore, use with care.
 // https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html
-func (t *Transaction) WithIdempotencyToken(token string) *Transaction {
+func (t *Tx) WithIdempotencyToken(token string) *Tx {
 	if t.stackCounter > 0 {
 		panic("cannot change idempotency token after transaction started")
 	}
@@ -75,26 +75,26 @@ func (t *Transaction) WithIdempotencyToken(token string) *Transaction {
 	return t
 }
 
-type TransactionFactory struct {
+type TxFactory struct {
 	Client *dynamodbv2.Client
 }
 
-func (f *TransactionFactory) New() *Transaction {
-	return NewTransaction(f.Client)
+func (f *TxFactory) New() *Tx {
+	return NewTx(f.Client)
 }
 
-func NewTransaction(ddb *dynamodbv2.Client) *Transaction {
-	return &Transaction{
+func NewTx(ddb *dynamodbv2.Client) *Tx {
+	return &Tx{
 		ddb:     ddb,
 		actions: make(map[PrimaryKey]Action),
 	}
 }
 
-func (t *Transaction) Start(ctx context.Context) {
+func (t *Tx) Start(ctx context.Context) {
 	t.stackCounter++
 }
 
-func (t *Transaction) AddAction(ctx context.Context, a Action) error {
+func (t *Tx) AddAction(ctx context.Context, a Action) error {
 	if _, found := t.actions[a.PrimaryKey()]; found {
 		//todo TEST this
 		return fmt.Errorf("an action already exists for primary key: %v", a.PrimaryKey())
@@ -105,7 +105,7 @@ func (t *Transaction) AddAction(ctx context.Context, a Action) error {
 
 // If a transaction already started in this context, commit in this context does nothing, since it's not the outer-most transaction.
 // todo: add return value
-func (t *Transaction) Commit(ctx context.Context) error {
+func (t *Tx) Commit(ctx context.Context) error {
 	t.stackCounter--
 	if t.stackCounter < 0 {
 		return fmt.Errorf("too many commits, no started transaction")
