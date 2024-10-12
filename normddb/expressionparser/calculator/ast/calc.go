@@ -1,8 +1,7 @@
 package ast
 
 import (
-	"fmt"
-	"strconv"
+	"norm/normddb/expressionparser/astutil"
 )
 
 type Node interface {
@@ -10,28 +9,13 @@ type Node interface {
 }
 
 func NewIntExpr(b []byte) IntExpr {
-	i, err := strconv.Atoi(string(b))
-	if err != nil {
-		panic(err)
-	}
+	i := astutil.Int(b)
 	return IntExpr(i)
 }
 
 func NewTermExpr(factor, rest any) *TermExpr {
-	f, ok := factor.(*FactorExpr)
-	if !ok {
-		panic(fmt.Sprintf("termexpr failed typecast of fact: got %T want %T", factor, f))
-	}
-
-	var parts []*TermPart
-	anyParts := rest.([]any)
-	for p := range anyParts {
-		part, ok := anyParts[p].(*TermPart)
-		if !ok {
-			panic(fmt.Sprintf("termexpr failed typecast of termpart: got %T want %T", rest, parts))
-		}
-		parts = append(parts, part)
-	}
+	f := astutil.CastTo[*FactorExpr](factor, "factor->*FactorExpr")
+	parts := astutil.ToSlice[*TermPart](rest, "rest->[]*TermPart")
 	return &TermExpr{
 		Term: f,
 		Rest: parts,
@@ -39,19 +23,8 @@ func NewTermExpr(factor, rest any) *TermExpr {
 }
 
 func NewFactorExpr(node, rest any) *FactorExpr {
-	n, ok := node.(Node)
-	if !ok {
-		panic(fmt.Sprintf("factorexpr failed typecast of node: got %T want %T", n, node))
-	}
-	var parts []*FactorPart
-	anyParts := rest.([]any)
-	for p := range anyParts {
-		part, ok := anyParts[p].(*FactorPart)
-		if !ok {
-			panic(fmt.Sprintf("factorexpr failed typecast of factorpart: got %T want %T", rest, parts))
-		}
-		parts = append(parts, part)
-	}
+	n := astutil.CastTo[Node](node, "node->Node")
+	parts := astutil.ToSlice[*FactorPart](rest, "rest->[]*FactorPart")
 	return &FactorExpr{
 		Factor: n,
 		Rest:   parts,
@@ -59,14 +32,8 @@ func NewFactorExpr(node, rest any) *FactorExpr {
 }
 
 func NewFactorPart(op any, fact any) *FactorPart {
-	f, ok := fact.(Node)
-	if !ok {
-		panic(fmt.Sprintf("factorpart failed typecast of fact: got %T want %T", fact, f))
-	}
-	mulOp, ok := op.(MulOp)
-	if !ok {
-		panic(fmt.Sprintf("factorpart failed typecast of mulop: got %T want %T", op, mulOp))
-	}
+	f := astutil.CastTo[Node](fact, "fact->Node")
+	mulOp := astutil.CastTo[MulOp](op, "op->MulOp")
 	return &FactorPart{
 		Op:   mulOp,
 		Fact: f,
@@ -74,14 +41,8 @@ func NewFactorPart(op any, fact any) *FactorPart {
 }
 
 func NewTermPart(op any, term any) *TermPart {
-	t, ok := term.(Node)
-	if !ok {
-		panic(fmt.Sprintf("termpart failed typecast of term: got %T want %T", term, t))
-	}
-	addOp, ok := op.(AddOp)
-	if !ok {
-		panic(fmt.Sprintf("termpart failed typecast of addop: got %T want %T", op, addOp))
-	}
+	t := astutil.CastTo[Node](term, "term->Node")
+	addOp := astutil.CastTo[AddOp](op, "op->AddOp")
 	return &TermPart{
 		AddOp: addOp,
 		Term:  t,
