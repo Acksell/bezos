@@ -1,0 +1,75 @@
+{
+	package main
+
+	import "norm/normddb/expressionparser/calculator/ast"
+
+	// for testing
+	var cntCodeBlocks int
+
+	func main() {
+		if len(os.Args) != 2 {
+			log.Fatal("Usage: calculator 'EXPR'")
+		}
+		got, err := ParseReader("", strings.NewReader(os.Args[1]))
+		if err != nil {
+			log.Fatal(err)
+		}
+		st, ok := got.(ast.Node)
+		if !ok {
+			log.Fatal("Not an ast.Node")
+		}
+		fmt.Println("=", st.Eval())
+	}	
+}
+	
+Input <- expr:Expr EOF {
+	cntCodeBlocks++
+	return expr, nil
+}
+
+Expr <- _ first:Term rest:(TermPart)* _ {
+	cntCodeBlocks++
+	return ast.NewTermExpr(first, rest), nil
+}
+
+Term <- first:Factor rest:(FactorPart)* {
+	cntCodeBlocks++
+	return ast.NewFactorExpr(first, rest), nil
+}
+
+TermPart <- _ op:AddOp _ term:Term {
+	cntCodeBlocks++
+	return ast.NewTermPart(op, term), nil
+}
+
+Factor <- '(' expr:Expr ')' {
+	cntCodeBlocks++
+	return expr, nil
+} / integer:Integer {
+	cntCodeBlocks++
+	return integer, nil
+}
+
+FactorPart <- _ op:MulOp _ factor:Factor {
+	cntCodeBlocks++
+	return ast.NewFactorPart(op, factor), nil
+}
+
+AddOp <- ( '+' / '-' ) {
+	cntCodeBlocks++
+	return ast.AddOp(c.text), nil
+}
+
+MulOp <- ( '*' / '/' ) {
+	cntCodeBlocks++
+	return ast.MulOp(c.text), nil
+}
+
+Integer <- '-'? [0-9]+ {
+	cntCodeBlocks++
+	return ast.NewIntExpr(c.text), nil
+}
+
+_ "whitespace" <- [ \n\t\r]*
+
+EOF <- !.
