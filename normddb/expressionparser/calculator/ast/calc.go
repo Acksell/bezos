@@ -9,7 +9,7 @@ type Node interface {
 }
 
 func NewIntExpr(b []byte) IntExpr {
-	i := astutil.Int(b)
+	i := astutil.Atoi(string(b))
 	return IntExpr(i)
 }
 
