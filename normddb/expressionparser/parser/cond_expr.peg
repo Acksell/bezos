@@ -1,0 +1,183 @@
+{
+  package parser
+
+  import (
+    "strings"
+
+    "norm/normddb/expressionparser/ast"
+    "norm/normddb/expressionparser/astutil"
+  )
+}
+
+// XXX: We should really refactor this to just construct the expression tree first,
+//      and then traverse to check errors afterwards
+
+Start
+  = _ expr:OrConditionExpression _ {  
+      // c.checkMisusedSize(expr)
+      //todo { nestedPaths: nestedPaths, pathHeads: pathHeads }
+      // c.checkErrors()
+      return expr, nil
+    }
+
+OrConditionExpression
+  = x:AndConditionExpression _ token:OrToken _ y:OrConditionExpression {
+      // c.checkMisusedSize(x)
+      // c.checkMisusedSize(y)
+      return ast.NewOrCondition(x, y), nil
+    }
+  / expr:AndConditionExpression
+
+AndConditionExpression
+  = x:NotConditionExpression _ AndToken _ y:AndConditionExpression {
+      // c.checkMisusedSize(x)
+      // c.checkMisusedSize(y)
+      return ast.NewAndCondition(x, y), nil
+    }
+  / NotConditionExpression
+
+NotConditionExpression
+  = token:NotToken _ expr:ParensConditionExpression {
+      // c.checkMisusedSize(expr)
+      return ast.NewNotCondition(expr), nil
+    }
+  / ParensConditionExpression
+
+ParensConditionExpression
+  = '(' _ '(' _ expr:OrConditionExpression _ ')' _ ')' {
+      // c.redundantParensError()
+      return expr, nil
+    }
+  / '(' _ '(' _ expr:ConditionExpression _ ')' _ ')' {
+      // c.redundantParensError()
+      // c.checkConditionErrors()
+      return expr, nil
+    }
+  / expr:ConditionExpression {
+      // c.checkConditionErrors()
+      return expr, nil
+    }
+  / '(' _ expr:OrConditionExpression _ ')' {
+      return expr, nil
+    }
+
+ConditionExpression
+  = left:OperandParens _ comp:Comparator _ right:OperandParens {
+      // c.checkMisusedFunction([x, y])
+      // c.checkDistinct(comp, [x, y])
+      return ast.NewComparison(comp, left, right), nil
+    }
+  / val:OperandParens _ BetweenToken _ low:OperandParens _ AndToken _ high:OperandParens {
+      // checkMisusedFunction([x, y, z])
+      // checkBetweenArgs(y, z)
+      return ast.NewBetweenExpr(val, low, high), nil
+    }
+  / val:OperandParens _ token:InToken _ '(' _ container:FunctionArgumentList _ ')' {
+      // checkMisusedFunction([x].concat(args))
+      return ast.NewContainsExpr(container, val), nil
+    }
+  / f:Function
+
+Comparator
+  = ">="
+  / "<="
+  / "<>"
+  / "="
+  / "<"
+  / ">"
+
+OperandParens
+  = '(' _ '(' _ op:Operand _ ')' _ ')' {
+      // redundantParensError()
+      return op, nil
+    }
+  / '(' _ op:Operand _ ')' {
+      return op, nil
+    }
+  / Operand
+
+Operand
+  = Function
+  / ExpressionAttributeValue
+  / path:PathExpression 
+
+Function
+  = !ReservedWord head:IdentifierStart tail:IdentifierPart* _ '(' _ args:FunctionArgumentList _ ')' {
+      // checkMisusedFunction(args)
+      name := astutil.HeadTailString(head, tail)
+      // attrType := checkFunction(name, args)
+      return ast.NewFunctionCallExpr(name, args), nil
+    }
+
+FunctionArgumentList
+  = head:OperandParens tail:(_ ',' _ expr:OperandParens { return expr, nil })* {
+      return astutil.HeadTailList(head, tail), nil
+    }
+
+ExpressionAttributeName
+  = !ReservedWord head:'#' tail:IdentifierPart* {
+      return ast.NewExpressionAttributeName(astutil.HeadTailString(head, tail)), nil
+    }
+
+ExpressionAttributeValue
+  = !ReservedWord head:':' tail:IdentifierPart* {
+      // resolveAttrVal(head + tail.join(''))
+      return ast.NewExpressionAttributeValue(astutil.HeadTailString(head,tail)), nil
+    }
+
+PathExpression
+  = head:GroupedPathExpression tail:(
+      _ '[' _ ix:[0-9]+ _ ']' {
+        return astutil.Atoi(astutil.Join(ix)), nil
+      }
+    / _ '.' _ prop:Identifier {
+        return string(c.text), nil
+      }
+    )* {
+      return ast.NewAttributePathExpr(head, tail), nil
+    }
+
+GroupedPathExpression
+  = Identifier
+  / '(' _ '(' _ path:PathExpression _ ')' _ ')' {
+      // redundantParensError()
+      return path, nil
+    }
+  / '(' _ path:PathExpression _ ')' {
+      return path, nil
+    }
+
+Identifier
+  = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
+      return astutil.HeadTailString(head, tail), nil
+    }
+  / ExpressionAttributeName
+
+IdentifierStart
+  = [a-zA-Z]
+  / '_'
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+AttributePart
+  = IdentifierPart
+  / '#'
+  / ':'
+
+ReservedWord
+  = BetweenToken
+  / InToken
+  / AndToken
+  / OrToken
+  / NotToken
+
+BetweenToken = "BETWEEN"i !AttributePart
+InToken = "IN"i !AttributePart
+AndToken = "AND"i !AttributePart
+OrToken = "OR"i !AttributePart
+NotToken = "NOT"i !AttributePart
+
+_ "whitespace"
+  = [ \t\r\n]*
