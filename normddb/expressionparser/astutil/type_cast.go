@@ -14,7 +14,17 @@ func CastTo[T any](v any, errctx ...string) T {
 	return out
 }
 
+func Int(v any) int {
+	return CastTo[int](v)
+}
+
 func String(v any) string {
+	switch v := v.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	}
 	return CastTo[string](v)
 }
 
@@ -38,8 +48,10 @@ func Float64(v any) float64 {
 
 func ToSlice[T any](v any, errctx ...string) []T {
 	var out []T
-	anySlice := v.([]any)
-
+	anySlice, ok := v.([]any)
+	if !ok {
+		panic(fmt.Sprintf("%s: type assertion failed: got %T want []any", strings.Join(errctx, " "), v))
+	}
 	for _, elem := range anySlice {
 		t := CastTo[T](elem, errctx...)
 		out = append(out, t)
@@ -48,13 +60,23 @@ func ToSlice[T any](v any, errctx ...string) []T {
 }
 
 func HeadTailString(head any, tail any) string {
-	return CastTo[string](head) + Join(tail)
+	hb := CastTo[[]byte](head, "astutil.HeadTailString hb")
+	s := string(hb)
+	if tail == nil {
+		return s
+	}
+
+	tb := ToSlice[[]byte](tail, "astutil.HeadTailString tb")
+	for _, b := range tb {
+		s += string(b)
+	}
+	return s
 }
 
 func Join(group any) string {
-	return strings.Join(ToSlice[string](group), "")
+	return strings.Join(ToSlice[string](group, "astutil.Join"), "")
 }
 
-func HeadTailList(head any, tail any) []string {
-	return append([]string{CastTo[string](head)}, ToSlice[string](tail)...)
+func HeadTailList(head any, tail any) []any {
+	return append([]any{head}, ToSlice[any](tail, "astutil.HeadTailList")...)
 }

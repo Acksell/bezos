@@ -99,7 +99,7 @@ OperandParens
 Operand
   = Function
   / ExpressionAttributeValue
-  / path:PathExpression 
+  / PathExpression 
 
 Function
   = !ReservedWord head:IdentifierStart tail:IdentifierPart* _ '(' _ args:FunctionArgumentList _ ')' {
@@ -111,27 +111,27 @@ Function
 
 FunctionArgumentList
   = head:OperandParens tail:(_ ',' _ expr:OperandParens { return expr, nil })* {
-      return astutil.HeadTailList(head, tail), nil
+      return astutil.ToSlice[ast.Expression](astutil.HeadTailList(head, tail)), nil
     }
 
 ExpressionAttributeName
-  = !ReservedWord head:'#' tail:IdentifierPart* {
-      return ast.NewExpressionAttributeName(astutil.HeadTailString(head, tail)), nil
+  = !ReservedWord head:"#" tail:IdentifierPart* {
+      return ast.NewExpressionAttributeName(string(c.text)), nil
     }
 
 ExpressionAttributeValue
-  = !ReservedWord head:':' tail:IdentifierPart* {
+  = !ReservedWord head:":" tail:IdentifierPart* {
       // resolveAttrVal(head + tail.join(''))
-      return ast.NewExpressionAttributeValue(astutil.HeadTailString(head,tail)), nil
+      return ast.NewExpressionAttributeValue(string(c.text)), nil
     }
 
 PathExpression
   = head:GroupedPathExpression tail:(
-      _ '[' _ ix:[0-9]+ _ ']' {
-        return astutil.Atoi(astutil.Join(ix)), nil
+      _ '[' _ [0-9]+ _ ']' {
+        return astutil.Atoi(strings.Trim(string(c.text), "[]")), nil
       }
     / _ '.' _ prop:Identifier {
-        return string(c.text), nil
+        return prop, nil
       }
     )* {
       return ast.NewAttributePathExpr(head, tail), nil
@@ -155,7 +155,7 @@ Identifier
 
 IdentifierStart
   = [a-zA-Z]
-  / '_'
+  / "_"
 
 IdentifierPart
   = IdentifierStart
@@ -163,8 +163,8 @@ IdentifierPart
 
 AttributePart
   = IdentifierPart
-  / '#'
-  / ':'
+  / "#"
+  / ":"
 
 ReservedWord
   = BetweenToken

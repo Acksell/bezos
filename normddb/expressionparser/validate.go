@@ -9,19 +9,27 @@ import (
 )
 
 type Condition struct {
-	condition        string
-	expressionNames  map[string]string
-	expressionValues map[string]types.AttributeValue
+	Condition        string
+	ExpressionNames  map[string]string
+	ExpressionValues map[string]types.AttributeValue
 }
 
-func ValidateCondition(c Condition, doc map[string]types.AttributeValue) (bool, error) {
+func ValidateCondition(c Condition, doc map[string]types.AttributeValue) (match bool, err error) {
 	// errs := make(errorsMap)
 	// p := newParser("", []byte(in), GlobalStore("errors", errs))
 	// parsed, err := p.parse(g)
 	// if err != nil {
 	// 	return false, err
 	// }
-	parsed, err := parser.Parse("validateCondition", []byte(c.condition))
+	defer func() {
+		if r := recover(); r != nil {
+			// error message is stored in the panic value, because AST uses panics atm
+			// even in Eval() method. Modifying err value here will return it to the caller.
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+
+	parsed, err := parser.Parse("validateCondition", []byte(c.Condition))
 	if err != nil {
 		return false, err
 	}
@@ -31,8 +39,8 @@ func ValidateCondition(c Condition, doc map[string]types.AttributeValue) (bool, 
 	}
 	v := cond.Eval(ast.Input{
 		Document:         convertToASTVals(doc),
-		ExpressionNames:  c.expressionNames,
-		ExpressionValues: convertToASTVals(c.expressionValues),
+		ExpressionNames:  c.ExpressionNames,
+		ExpressionValues: convertToASTVals(c.ExpressionValues),
 	})
 	return v, nil
 }
