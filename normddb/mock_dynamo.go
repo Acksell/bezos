@@ -14,10 +14,15 @@ type dynamock struct {
 	store *mockStore
 }
 
+type IO interface {
+	Writer
+	Reader
+}
+
 var _ Writer = &dynamock{}
 var _ Reader = &dynamock{}
 
-type Writer interface { // Should options be passed in here?
+type Writer interface {
 	NewTx(...TxOption) Txer
 	NewBatch(...BatchOption) Batcher
 }
@@ -42,7 +47,6 @@ type Querier interface {
 	QueryAll(context.Context) (QueryResult, error)
 }
 
-// todo you can actually do batch-gets on multiple tables. Change this interface
 type Getter interface {
 	Lookup(context.Context, ItemIdentifier) (DynamoEntity, error)
 	TxLookupMany(context.Context, ...ItemIdentifier) ([]DynamoEntity, error)

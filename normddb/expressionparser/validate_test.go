@@ -26,6 +26,15 @@ func TestValidateCondition(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "simple negative condition",
+			cond: expression.AttributeExists(expression.Name("nope")).And(expression.Name("id").Equal(expression.Value("123"))),
+			doc: map[string]types.AttributeValue{
+				"id": &types.AttributeValueMemberS{Value: "123"},
+			},
+			expected:  false,
+			shouldErr: true,
+		},
+		{
 			name: "nested path",
 			cond: expression.Name("nested.path").AttributeExists().And(expression.Name("nested.path").Equal(expression.Value("123"))),
 			doc: map[string]types.AttributeValue{

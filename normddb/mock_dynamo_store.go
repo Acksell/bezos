@@ -17,7 +17,7 @@ type mockStore struct {
 	tables map[string]*table
 }
 
-type table struct {
+type mockTable struct {
 	name  TableDefinition
 	store map[partitionKey][]DynamoEntity
 }

@@ -5,15 +5,6 @@ import (
 	"norm/normddb/expressionparser/astutil"
 )
 
-// DB uses parser for conditionexpression
-// which returns this AST to use for
-// interpreting and evaluating the condition
-// against a given DDB document
-
-type tableDefinition struct { // part of input
-	// todo, what needs to be here? is it needed at all?
-}
-
 type Input struct {
 	Document         map[string]AttributeValue
 	ExpressionNames  map[string]string
@@ -21,6 +12,11 @@ type Input struct {
 }
 
 // Condition is the root interface for all AST nodes for Conditions.
+//
+// DB uses parser for conditionexpression
+// which returns this AST to use for
+// interpreting and evaluating the condition
+// against a given DDB document
 type Condition interface {
 	Eval(input Input) bool
 }
@@ -109,30 +105,6 @@ type Comparison struct {
 	Left     Expression // left operand
 	Right    Expression // right operand
 }
-
-// func Reduce(op *Operand) any {
-// 	if isReduced(op) {
-// 		return op.Value
-// 	}
-// 	// if op.Value
-// 	return Reduce(op.Value)
-// }
-
-// func isReduced(op any) bool {
-// 	switch v := op.(type) {
-// 	case *Operand:
-// 		return isLiteral(v.Value)
-// 	}
-// 	return false
-// }
-
-// func isLiteral(v any) bool {
-// 	switch v := v.(type) {
-// 	case string, int, float64, bool:
-// 		return true
-// 	}
-// 	return false
-// }
 
 func (c *Comparison) Eval(input Input) bool {
 	leftVal := c.Left.GetValue(input)
@@ -268,6 +240,7 @@ func (p *AttributePath) GetValue(input Input) *Operand {
 	return &Operand{Value: v.Value, Type: v.Type}
 }
 
+// only for debugging
 func FullPath(parts []*AttributePathPart, input Input) string {
 	var path string
 	for _, part := range parts {
