@@ -4,6 +4,7 @@ type TableDefinition struct {
 	Name           string
 	KeyDefinitions PrimaryKeyDefinition
 	TimeToLiveKey  string
+	IsGSI          bool
 	GSIs           []GSIDefinition
 	// GlobalProjections []ProjectionSpec
 

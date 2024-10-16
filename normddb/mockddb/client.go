@@ -118,7 +118,7 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 		return nil, fmt.Errorf("item is required")
 	}
 
-	if params.ConditionExpression != nil {
+	if params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi
 		condition := expressionparser.Condition{
 			Condition:        *params.ConditionExpression,
 			ExpressionValues: params.ExpressionAttributeValues,
@@ -139,6 +139,10 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 	}
 
 	old := t.store[pk.Values.PartitionKey].ReplaceOrInsert(&document{pk, params.Item})
+
+	if t.definition.IsGSI { // if it's a GSI we can return early here.
+		return nil, nil
+	}
 
 	for _, gsi := range t.gsis {
 		gsi.PutItem(ctx, params, optFns...)
