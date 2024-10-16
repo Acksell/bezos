@@ -2,6 +2,7 @@ package normddb
 
 import (
 	"fmt"
+	"norm/normddb/table"
 	"time"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -9,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewUnsafeUpdate(table TableDefinition, pk PrimaryKey) *UnsafeUpdate {
+func NewUnsafeUpdate(table TableDefinition, pk table.PrimaryKey) *UnsafeUpdate {
 	return &UnsafeUpdate{
 		Table: table,
 		Key:   pk,
@@ -20,7 +21,7 @@ func (u *UnsafeUpdate) TableName() *string {
 	return &u.Table.Name
 }
 
-func (u *UnsafeUpdate) PrimaryKey() PrimaryKey {
+func (u *UnsafeUpdate) PrimaryKey() table.PrimaryKey {
 	return u.Key
 }
 

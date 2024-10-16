@@ -3,6 +3,7 @@ package normddb
 import (
 	"context"
 	"fmt"
+	"norm/normddb/table"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -162,17 +163,17 @@ func (q *querier) WithEntityFilter(typ string) *querier {
 
 var Table = TableDefinition{
 	Name: "test-table",
-	KeyDefinitions: PrimaryKeyDefinition{
-		PartitionKey: KeyDef{"pk", KeyKindS},
-		SortKey:      KeyDef{"sk", KeyKindS},
+	KeyDefinitions: table.PrimaryKeyDefinition{
+		PartitionKey: table.KeyDef{"pk", table.KeyKindS},
+		SortKey:      table.KeyDef{"sk", table.KeyKindS},
 	},
 	TimeToLiveKey: "ttl",
 	GSIs: []GSIDefinition{
 		{
 			IndexName: "byName",
-			Key: PrimaryKeyDefinition{
-				PartitionKey: KeyDef{"pk", KeyKindS},
-				SortKey:      KeyDef{"name", KeyKindS},
+			Key: table.PrimaryKeyDefinition{
+				PartitionKey: table.KeyDef{"pk", table.KeyKindS},
+				SortKey:      table.KeyDef{"name", table.KeyKindS},
 			},
 		},
 	},

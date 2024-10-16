@@ -1,6 +1,7 @@
 package normddb
 
 import (
+	"norm/normddb/table"
 	"time"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -8,14 +9,14 @@ import (
 
 type Action interface {
 	TableName() *string
-	PrimaryKey() PrimaryKey
+	PrimaryKey() table.PrimaryKey
 }
 
 type Put struct {
 	Table TableDefinition
 	// Index  Index
 	Entity DynamoEntity
-	Key    PrimaryKey
+	Key    table.PrimaryKey
 
 	ttlExpiry *time.Time
 
@@ -27,7 +28,7 @@ type Put struct {
 // operation relies solely on the user doing careful validations before committing.
 type UnsafeUpdate struct {
 	Table  TableDefinition
-	Key    PrimaryKey
+	Key    table.PrimaryKey
 	Fields map[string]UpdateOp
 
 	ttlExpiry          *time.Time
@@ -39,7 +40,7 @@ type UnsafeUpdate struct {
 
 type Delete struct {
 	Table TableDefinition
-	Key   PrimaryKey
+	Key   table.PrimaryKey
 
 	c expression2.ConditionBuilder
 }

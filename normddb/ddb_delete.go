@@ -2,13 +2,14 @@ package normddb
 
 import (
 	"fmt"
+	"norm/normddb/table"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewDelete(table TableDefinition, pk PrimaryKey) *Delete {
+func NewDelete(table TableDefinition, pk table.PrimaryKey) *Delete {
 	return &Delete{
 		Table: table,
 		Key:   pk,
@@ -19,7 +20,7 @@ func (d *Delete) TableName() *string {
 	return &d.Table.Name
 }
 
-func (d *Delete) PrimaryKey() PrimaryKey {
+func (d *Delete) PrimaryKey() table.PrimaryKey {
 	return d.Key
 }
 

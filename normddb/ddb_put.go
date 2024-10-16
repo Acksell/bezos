@@ -2,6 +2,7 @@ package normddb
 
 import (
 	"fmt"
+	"norm/normddb/table"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
@@ -11,7 +12,7 @@ import (
 )
 
 // todo make private and only allow people to interact via indices?
-func NewPut(table TableDefinition, key PrimaryKey, e DynamoEntity) *Put {
+func NewPut(table TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
 	return &Put{
 		Table:  table,
 		Key:    key,
@@ -23,7 +24,7 @@ func (p *Put) TableName() *string {
 	return &p.Table.Name
 }
 
-func (p *Put) PrimaryKey() PrimaryKey {
+func (p *Put) PrimaryKey() table.PrimaryKey {
 	return p.Key
 }
 

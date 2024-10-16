@@ -3,6 +3,7 @@ package normddb
 import (
 	"context"
 	"fmt"
+	"norm/normddb/table"
 
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -11,7 +12,7 @@ import (
 func NewTxer(ddb *dynamodbv2.Client) Txer {
 	return &txer{
 		ddb:     ddb,
-		actions: make(map[PrimaryKey]Action),
+		actions: make(map[table.PrimaryKey]Action),
 	}
 }
 
@@ -20,13 +21,14 @@ type txer struct {
 
 	opts txOpts
 
-	actions map[PrimaryKey]Action
+	actions map[table.PrimaryKey]Action
 
 	// once stackCounter goes from 1 to 0, the transaction is committed to database.
 	// incremented on Start(), decremented on Commit()
-	stackCounter int
+	stackCounter int // todo remove stackcounter implementation
 }
 
+// todo remove Start function and stackcounter implementation
 func (tx *txer) Start(ctx context.Context, opts ...TxOption) {
 	for _, opt := range opts {
 		opt(&tx.opts)

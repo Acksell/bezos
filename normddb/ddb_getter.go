@@ -2,6 +2,7 @@ package normddb
 
 import (
 	"context"
+	"norm/normddb/table"
 
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
@@ -22,7 +23,7 @@ func NewGetter(ddb *dynamodbv2.Client) *getter {
 
 type ItemIdentifier struct {
 	Table string
-	Key   PrimaryKey
+	Key   table.PrimaryKey
 }
 
 func (g *getter) Lookup(ctx context.Context, item ItemIdentifier) (DynamoEntity, error) {
