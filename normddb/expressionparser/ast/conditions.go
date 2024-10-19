@@ -258,6 +258,11 @@ func FullPath(parts []*AttributePathPart, input Input) string {
 func NewAttributePathPart(p any) *AttributePathPart {
 	switch v := p.(type) {
 	case string:
+		// todo: verify that each pathpart needs validation, or if just the first pathpart needs it.
+		// e.g. it's unclear whether the path "comment.text" is valid (both comment and text are reserved words).
+		if isReservedName(v) {
+			panic(fmt.Sprintf("attribute name %q is reserved, use ExpressionAttributeNames instead", v))
+		}
 		return &AttributePathPart{Identifier: &Identifier{Name: &v}}
 	case int:
 		return &AttributePathPart{Index: &v}
