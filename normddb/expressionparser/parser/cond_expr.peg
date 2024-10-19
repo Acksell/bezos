@@ -166,6 +166,7 @@ AttributePart
   / "#"
   / ":"
 
+// todo rename to "OperatorWord", figure out why we really need !ReservedWord, for performance or for correctness?
 ReservedWord
   = BetweenToken
   / InToken
