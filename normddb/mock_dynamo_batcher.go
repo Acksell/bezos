@@ -3,8 +3,8 @@ package normddb
 import "context"
 
 type mockBatcher struct {
-	opts  batchOpts
-	store *mockStore
+	opts batchOpts
+	// store *mockStore
 }
 
 var _ Batcher = &mockBatcher{}

@@ -20,15 +20,15 @@ import (
 // )
 
 type querier struct {
-	ddb *dynamodbv2.Client //? separate the client from this type and instead use different custom ddb client?
+	awsddb AWSDynamoClientV2
 
-	table   TableDefinition
+	table   table.TableDefinition
 	keyCond KeyCondition
 
 	//internal, not exposed to user
 	lastCursor map[string]types.AttributeValue
 
-	opts *queryOptions
+	opts queryOptions
 }
 
 type queryOptions struct {
@@ -60,14 +60,19 @@ func NewKeyCondition(partition any, strategy SortKeyStrategy) KeyCondition {
 // todo: replace TableDefinition argument with "Index" interface that has "Table()" method, and "IndexName()" method.
 // The base table can export methods like "Primary()", "GSI_1()" that return the index.
 // Then you can call them via "artifacts.Table.GSI_1()"
-func NewQuerier(ddb *dynamodbv2.Client, table TableDefinition, kc KeyCondition) *querier {
-	return &querier{
-		ddb:     ddb,
+func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondition, opts ...QueryOption) *querier {
+	q := &querier{
+		awsddb:  ddb,
+		table:   table,
 		keyCond: kc,
-		opts: &queryOptions{
+		opts: queryOptions{
 			pageSize: defaultPageSize,
 		},
 	}
+	for _, opt := range opts {
+		opt(&q.opts)
+	}
+	return q
 }
 
 type QueryResult struct {
@@ -92,7 +97,7 @@ func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
 		return nil, fmt.Errorf("failed to build query expression: %w", err)
 	}
 
-	res, err := q.ddb.Query(ctx, &dynamodbv2.QueryInput{
+	res, err := q.awsddb.Query(ctx, &dynamodbv2.QueryInput{
 		TableName:                 &q.table.Name,
 		IndexName:                 q.opts.indexName,
 		KeyConditionExpression:    expr.KeyCondition(),
@@ -161,17 +166,17 @@ func (q *querier) WithEntityFilter(typ string) *querier {
 	return q
 }
 
-var Table = TableDefinition{
+var Table = table.TableDefinition{
 	Name: "test-table",
 	KeyDefinitions: table.PrimaryKeyDefinition{
 		PartitionKey: table.KeyDef{"pk", table.KeyKindS},
 		SortKey:      table.KeyDef{"sk", table.KeyKindS},
 	},
 	TimeToLiveKey: "ttl",
-	GSIs: []GSIDefinition{
+	GSIs: []table.TableDefinition{
 		{
-			IndexName: "byName",
-			Key: table.PrimaryKeyDefinition{
+			Name: "byName",
+			KeyDefinitions: table.PrimaryKeyDefinition{
 				PartitionKey: table.KeyDef{"pk", table.KeyKindS},
 				SortKey:      table.KeyDef{"name", table.KeyKindS},
 			},

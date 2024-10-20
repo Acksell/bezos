@@ -3,8 +3,8 @@ package normddb
 import "context"
 
 type mockTxer struct {
-	opts  txOpts
-	store *mockStore
+	opts txOpts
+	// store *mockStore
 }
 
 var _ Txer = &mockTxer{}

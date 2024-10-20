@@ -12,7 +12,7 @@ import (
 )
 
 // todo make private and only allow people to interact via indices?
-func NewPut(table TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
+func NewPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
 	return &Put{
 		Table:  table,
 		Key:    key,

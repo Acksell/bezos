@@ -9,15 +9,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewTxer(ddb *dynamodbv2.Client) Txer {
-	return &txer{
-		ddb:     ddb,
+func NewTxer(ddb AWSDynamoClientV2, opts ...TxOption) Txer {
+	tx := &txer{
+		awsddb:  ddb,
 		actions: make(map[table.PrimaryKey]Action),
 	}
+	for _, opt := range opts {
+		opt(&tx.opts)
+	}
+	return tx
 }
 
 type txer struct {
-	ddb *dynamodbv2.Client //? separate the client from this type and instead use different custom ddb client?
+	awsddb AWSDynamoClientV2
 
 	opts txOpts
 
@@ -67,7 +71,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to convert put to put item: %w", err)
 				}
-				_, err = tx.ddb.PutItem(ctx, put)
+				_, err = tx.awsddb.PutItem(ctx, put)
 				if err != nil {
 					return fmt.Errorf("failed to put item: %w", err)
 				}
@@ -76,7 +80,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to convert update to update item: %w", err)
 				}
-				_, err = tx.ddb.UpdateItem(ctx, update)
+				_, err = tx.awsddb.UpdateItem(ctx, update)
 				if err != nil {
 					return fmt.Errorf("failed to update item: %w", err)
 				}
@@ -85,7 +89,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to convert delete to delete item: %w", err)
 				}
-				_, err = tx.ddb.DeleteItem(ctx, delete)
+				_, err = tx.awsddb.DeleteItem(ctx, delete)
 				if err != nil {
 					return fmt.Errorf("failed to delete item: %w", err)
 				}
@@ -106,7 +110,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 			TransactItems:      txInputs,
 			ClientRequestToken: &tx.opts.idempotencyToken,
 		}
-		_, err := tx.ddb.TransactWriteItems(ctx, params)
+		_, err := tx.awsddb.TransactWriteItems(ctx, params)
 		if err != nil {
 			return fmt.Errorf("failed to transact write items: %w", err)
 		}

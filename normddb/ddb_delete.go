@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewDelete(table TableDefinition, pk table.PrimaryKey) *Delete {
+func NewDelete(table table.TableDefinition, pk table.PrimaryKey) *Delete {
 	return &Delete{
 		Table: table,
 		Key:   pk,

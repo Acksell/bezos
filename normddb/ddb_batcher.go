@@ -2,13 +2,20 @@ package normddb
 
 import "context"
 
-func NewBatcher() *batcher {
-	return &batcher{}
+func NewBatcher(ddb AWSDynamoClientV2, opts ...BatchOption) *batcher {
+	b := &batcher{
+		awsddb: ddb,
+	}
+	for _, opt := range opts {
+		opt(&b.opts)
+	}
+	return b
 }
 
 // todo implement
 type batcher struct {
-	opts batchOpts
+	awsddb AWSDynamoClientV2
+	opts   batchOpts
 }
 
 var _ Batcher = &batcher{}

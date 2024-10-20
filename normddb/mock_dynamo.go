@@ -1,54 +1,22 @@
 package normddb
 
 import (
-	"context"
+	"norm/normddb/mockddb"
+	"norm/normddb/table"
 )
 
-func NewMock(defs ...TableDefinition) *dynamock {
-	return &dynamock{
-		store: newMockStore(defs...),
-	}
+func NewMock(defs ...table.TableDefinition) IO {
+	mock := mockddb.NewStore(defs...)
+	// works if mockddb.NewStore() is a good enough mock of AWSDynamoClientV2 iface
+	// todo implement projection expressions
+	return New(mock)
 }
 
+// todo can remove if mockddb.NewStore() supports all required DDB features.
 type dynamock struct {
-	store *mockStore
+	client AWSDynamoClientV2
 }
 
-type IO interface {
-	Writer
-	Reader
-}
-
+var _ IO = &dynamock{}
 var _ Writer = &dynamock{}
 var _ Reader = &dynamock{}
-
-type Writer interface {
-	NewTx(...TxOption) Txer
-	NewBatch(...BatchOption) Batcher
-}
-
-type Txer interface {
-	AddAction(context.Context, Action) error
-	Commit(context.Context) error
-}
-
-type Batcher interface {
-	AddAction(context.Context, Action) error
-	Write(context.Context) error
-}
-
-type Reader interface {
-	NewQuery(TableDefinition, KeyCondition, ...QueryOption) Querier
-	NewGet(...GetOption) Getter
-}
-
-type Querier interface {
-	Next(context.Context) (QueryResult, error)
-	QueryAll(context.Context) (QueryResult, error)
-}
-
-type Getter interface {
-	Lookup(context.Context, ItemIdentifier) (DynamoEntity, error)
-	TxLookupMany(context.Context, ...ItemIdentifier) ([]DynamoEntity, error)
-	BatchLookupMany(context.Context, ...ItemIdentifier) ([]DynamoEntity, error)
-}

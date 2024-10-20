@@ -3,22 +3,24 @@ package normddb
 import (
 	"context"
 	"norm/normddb/table"
-
-	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
 type getter struct {
-	ddb *dynamodbv2.Client
+	awsddb AWSDynamoClientV2
 
 	opts getOpts
 }
 
 var _ Getter = &getter{}
 
-func NewGetter(ddb *dynamodbv2.Client) *getter {
-	return &getter{
-		ddb: ddb,
+func NewGetter(ddb AWSDynamoClientV2, opts ...GetOption) *getter {
+	g := &getter{
+		awsddb: ddb,
 	}
+	for _, opt := range opts {
+		opt(&g.opts)
+	}
+	return g
 }
 
 type ItemIdentifier struct {

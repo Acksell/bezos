@@ -7,7 +7,9 @@ func (d *dynamock) NewTx(opts ...TxOption) Txer {
 	for _, opt := range opts {
 		opt(&txo)
 	}
-	return &mockTxer{store: d.store, opts: txo}
+	return &mockTxer{
+		// store: d.store,
+		opts: txo}
 }
 
 func (d *dynamock) NewBatch(opts ...BatchOption) Batcher {
@@ -15,5 +17,7 @@ func (d *dynamock) NewBatch(opts ...BatchOption) Batcher {
 	for _, opt := range opts {
 		opt(&batcho)
 	}
-	return &mockBatcher{store: d.store, opts: batcho}
+	return &mockBatcher{
+		// store: d.store,
+		opts: batcho}
 }

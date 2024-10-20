@@ -10,7 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewUnsafeUpdate(table TableDefinition, pk table.PrimaryKey) *UnsafeUpdate {
+func NewUnsafeUpdate(table table.TableDefinition, pk table.PrimaryKey) *UnsafeUpdate {
 	return &UnsafeUpdate{
 		Table: table,
 		Key:   pk,
