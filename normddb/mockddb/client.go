@@ -12,16 +12,27 @@ import (
 	"github.com/google/btree"
 )
 
+var errNotFound = fmt.Errorf("not found")
+
 func NewStore(defs ...table.TableDefinition) *mockStore {
-	tables := make(map[string]mockTable)
+	tables := make(map[string]*mockTable)
 	for _, t := range defs {
-		tables[t.Name] = mockTable{
+		var gsis []*mockTable
+		for _, gsi := range t.GSIs {
+			gsiTable := &mockTable{
+				definition: gsi,
+				store:      make(map[partitionKey]*btree.BTreeG[*document]),
+			}
+			gsis = append(gsis, gsiTable)
+		}
+		tables[t.Name] = &mockTable{
 			definition: t,
-			store:      make(map[partitionKey]*btree.BTree),
+			gsis:       gsis,
+			store:      make(map[partitionKey]*btree.BTreeG[*document]),
 		}
 	}
 	return &mockStore{
-		tables: make(map[string]*mockTable),
+		tables: tables,
 	}
 }
 
@@ -29,11 +40,22 @@ type mockStore struct {
 	tables map[string]*mockTable
 }
 
+func (s *mockStore) getTable(tableName *string) (*mockTable, error) {
+	if tableName == nil {
+		return nil, fmt.Errorf("table name is required")
+	}
+	table, ok := s.tables[*tableName]
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s, %v", *tableName, s.tables)
+	}
+	return table, nil
+}
+
 type mockTable struct {
 	definition table.TableDefinition
 	// A store with partition key as primary key and a btree for sort keys.
-	// Probably overkill but the library wasn't too big.
-	store map[partitionKey]*btree.BTree
+	// Probably overkill but the library wasn't too big, and API works well.
+	store map[partitionKey]*btree.BTreeG[*document]
 	gsis  []*mockTable
 }
 
@@ -44,69 +66,194 @@ type document struct {
 	value map[string]types.AttributeValue
 }
 
-func (d document) Less(than btree.Item) bool {
-	other, ok := than.(document)
-	if !ok {
-		panic("btree entry is not a document")
+func less(l *document, r *document) bool {
+	if l.pk.Definition.SortKey.Kind != r.pk.Definition.SortKey.Kind {
+		panic("sort key kind mismatch") // should not happen
 	}
-	switch d.pk.Definition.SortKey.Kind {
+	fmt.Println("less", l, r)
+	switch l.pk.Definition.SortKey.Kind {
 	case table.KeyKindS, table.KeyKindB:
-		return mustConvToString(d.pk.Values.SortKey) < mustConvToString(other.pk.Values.SortKey)
+		return mustConvToString(l.pk.Values.SortKey) < mustConvToString(r.pk.Values.SortKey)
 	case table.KeyKindN:
-		return mustConvFloat64(d.pk.Values.SortKey) < mustConvFloat64(other.pk.Values.SortKey)
+		return mustConvFloat64(l.pk.Values.SortKey) < mustConvFloat64(r.pk.Values.SortKey)
 	default:
 		panic("unsupported key kind")
 	}
 }
 
 func (t *mockTable) extractPrimaryKey(item map[string]types.AttributeValue) (table.PrimaryKey, error) {
-	keydef := t.definition.KeyDefinitions
-	part, ok := item[keydef.PartitionKey.Name]
-	if !ok {
-		return table.PrimaryKey{}, fmt.Errorf("partition key not found")
-	}
-	sort, ok := item[keydef.SortKey.Name]
-	if !ok && keydef.SortKey.Name != "" {
-		return table.PrimaryKey{}, fmt.Errorf("sort key not found")
-	}
-	pk := table.PrimaryKey{
-		Definition: keydef,
-		Values: table.PrimaryKeyValues{
-			PartitionKey: part,
-			SortKey:      sort,
-		},
+	pk, err := t.definition.ExtractPrimaryKey(item) // todo maybe this function should be in this package instead
+	if err != nil {
+		return table.PrimaryKey{}, err
 	}
 	return pk, nil
 }
 
+func (t *mockTable) getStore(pk partitionKey) *btree.BTreeG[*document] {
+	store, ok := t.store[pk]
+	fmt.Println("store", store, ok, pk)
+	if !ok {
+		store = btree.NewG(2, less)
+		t.store[pk] = store
+	}
+	return store
+}
+
 // A subset of methods dealing with IO on documents. Not including PartiQL statements.
 func (s *mockStore) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.RequestItems == nil {
+		return nil, fmt.Errorf("request items is required")
+	}
+	response := &dynamodb.BatchGetItemOutput{
+		Responses:       make(map[string][]map[string]types.AttributeValue),
+		UnprocessedKeys: make(map[string]types.KeysAndAttributes),
+	}
+	for tableName, keys := range params.RequestItems {
+		table, err := s.getTable(&tableName)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys.Keys {
+			pk, err := table.extractPrimaryKey(key)
+			if err != nil {
+				return nil, err
+			}
+			store := table.getStore(pk.Values.PartitionKey)
+			doc, found := store.Get(&document{pk, nil})
+			if found {
+				// TODO: handle projection expression
+				// TODO: handle consistent read option
+				response.Responses[tableName] = append(response.Responses[tableName], doc.value)
+			} else {
+				// Retrieve the current value, modify it, and put it back
+				unprocessedKeys := response.UnprocessedKeys[tableName]
+				unprocessedKeys.Keys = append(unprocessedKeys.Keys, key)
+				response.UnprocessedKeys[tableName] = unprocessedKeys
+			}
+		}
+	}
+
 	return nil, nil
 }
 
 func (s *mockStore) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
-	return nil, nil
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.RequestItems == nil {
+		return nil, fmt.Errorf("request items is required")
+	}
+	unprocessed := make(map[string][]types.WriteRequest)
+	for tableName, items := range params.RequestItems {
+		table, err := s.getTable(&tableName)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			switch {
+			case item.PutRequest != nil:
+				_, err := table.PutItem(ctx, &dynamodb.PutItemInput{
+					TableName: &tableName,
+					Item:      item.PutRequest.Item,
+				})
+				if err != nil {
+					unprocessed[tableName] = append(unprocessed[tableName], item)
+				}
+			case item.DeleteRequest != nil:
+				_, err := table.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+					TableName: &tableName,
+					Key:       item.DeleteRequest.Key,
+				})
+				if err != nil {
+					unprocessed[tableName] = append(unprocessed[tableName], item)
+				}
+			default:
+				return nil, fmt.Errorf("empty write request, must be put or delete")
+			}
+		}
+	}
+	return &dynamodb.BatchWriteItemOutput{
+		UnprocessedItems: unprocessed,
+	}, nil
 }
 
 func (s *mockStore) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
-	return nil, nil
+	table, err := s.getTable(params.TableName)
+	if err != nil {
+		return nil, err
+	}
+	return table.DeleteItem(ctx, params, optFns...)
+}
+
+func (t *mockTable) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.Key == nil {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	pk, err := t.extractPrimaryKey(params.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	store := t.getStore(pk.Values.PartitionKey)
+	old, _ := store.Delete(&document{pk, nil})
+
+	if t.definition.IsGSI { // if it's a GSI we can return early here.
+		return nil, nil
+	}
+
+	for _, gsi := range t.gsis {
+		gsi.DeleteItem(ctx, params, optFns...)
+	}
+
+	out := &dynamodb.DeleteItemOutput{}
+	if params.ReturnValues == types.ReturnValueAllOld {
+		out.Attributes = old.value
+	}
+	return out, nil
 }
 
 func (s *mockStore) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	return nil, nil
+	table, err := s.getTable(params.TableName)
+	if err != nil {
+		return nil, err
+	}
+	return table.GetItem(ctx, params, optFns...)
+}
+
+func (t *mockTable) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.Key == nil {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	pk, err := t.extractPrimaryKey(params.Key)
+	if err != nil {
+		return nil, err
+	}
+
+	store := t.getStore(pk.Values.PartitionKey)
+
+	doc, found := store.Get(&document{pk, nil})
+	if !found {
+		return &dynamodb.GetItemOutput{}, errNotFound
+	}
+	return &dynamodb.GetItemOutput{Item: doc.value}, nil
 }
 
 func (s *mockStore) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
-	if params.TableName == nil {
-		return nil, fmt.Errorf("table name is required")
+	table, err := s.getTable(params.TableName)
+	if err != nil {
+		return nil, err
 	}
-	tableName := *params.TableName
-
-	table, ok := s.tables[tableName]
-	if !ok {
-		return nil, fmt.Errorf("table not found")
-	}
-
 	return table.PutItem(ctx, params, optFns...)
 }
 
@@ -117,28 +264,32 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 	if params.Item == nil {
 		return nil, fmt.Errorf("item is required")
 	}
-
-	if params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi
-		condition := expressionparser.Condition{
-			Condition:        *params.ConditionExpression,
-			ExpressionValues: params.ExpressionAttributeValues,
-			ExpressionNames:  params.ExpressionAttributeNames,
-		}
-		valid, err := expressionparser.ValidateCondition(condition, params.Item)
-		if err != nil {
-			return nil, err
-		}
-		if !valid {
-			return nil, fmt.Errorf("condition failed")
-		}
-	}
-
 	pk, err := t.extractPrimaryKey(params.Item)
 	if err != nil {
 		return nil, err
 	}
 
-	old := t.store[pk.Values.PartitionKey].ReplaceOrInsert(&document{pk, params.Item})
+	store := t.getStore(pk.Values.PartitionKey)
+	// todo make concurrency safe - make topic queues
+	fmt.Println(store.Len())
+	doc, found := store.Get(&document{pk, nil})
+	fmt.Println("found", found, doc, pk.Values.PartitionKey, pk.Values.SortKey)
+	// only validate if document is found
+	if found && params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi, main table does it
+		condition := expressionparser.Condition{
+			Condition:        *params.ConditionExpression,
+			ExpressionValues: params.ExpressionAttributeValues,
+			ExpressionNames:  params.ExpressionAttributeNames,
+		}
+		valid, err := expressionparser.ValidateCondition(condition, doc.value)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("condition failed: %v %w", valid, err)
+		}
+	}
+	old, _ := store.ReplaceOrInsert(&document{pk, params.Item})
 
 	if t.definition.IsGSI { // if it's a GSI we can return early here.
 		return nil, nil
@@ -150,13 +301,43 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 
 	out := &dynamodb.PutItemOutput{}
 	if params.ReturnValues == types.ReturnValueAllOld {
-		out.Attributes = old.(*document).value
+		out.Attributes = old.value
 	}
 	return out, nil
 }
 
 func (s *mockStore) TransactGetItems(ctx context.Context, params *dynamodb.TransactGetItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactGetItemsOutput, error) {
-	return nil, nil
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.TransactItems == nil {
+		return nil, fmt.Errorf("transact items is required")
+	}
+	response := &dynamodb.TransactGetItemsOutput{
+		Responses:        make([]types.ItemResponse, 0),
+		ConsumedCapacity: make([]types.ConsumedCapacity, 0),
+	}
+	for _, item := range params.TransactItems {
+		if item.Get == nil {
+			return nil, fmt.Errorf("empty transact get item request")
+		}
+		table, err := s.getTable(item.Get.TableName)
+		if err != nil {
+			return nil, err
+		}
+		pk, err := table.extractPrimaryKey(item.Get.Key)
+		if err != nil {
+			return nil, err
+		}
+		store := table.getStore(pk.Values.PartitionKey)
+		doc, found := store.Get(&document{pk, nil})
+		if found {
+			response.Responses = append(response.Responses, types.ItemResponse{
+				Item: doc.value,
+			})
+		}
+	}
+	return response, nil
 }
 
 func (s *mockStore) TransactWriteItems(ctx context.Context, params *dynamodb.TransactWriteItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
