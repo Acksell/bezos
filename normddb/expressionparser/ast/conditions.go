@@ -305,9 +305,11 @@ func resolvePath(path []*AttributePathPart, input Input) (AttributeValue, bool) 
 	if attr, exists = input.Document[traversed]; !exists {
 		panic(fmt.Sprintf("attribute %s not found", traversed))
 	}
+	fmt.Println(attr, exists, traversed)
 
 	// follow the path
 	for i := 1; i < len(path); i++ {
+		fmt.Println("ITERATE", i)
 		part := path[i]
 		switch attr.Type {
 		case MAP:
@@ -330,6 +332,8 @@ func resolvePath(path []*AttributePathPart, input Input) (AttributeValue, bool) 
 			panic(fmt.Sprintf("unresolved path, attribute at path %s is not map or list got %T", traversed, attr.Value))
 		}
 	}
+
+	fmt.Println(attr, exists, traversed)
 
 	return attr, exists
 }
@@ -421,10 +425,9 @@ func (f *FunctionCall) GetValue(input Input) *Operand {
 func (f *FunctionCall) Eval(input Input) bool {
 	switch f.FunctionName {
 	case "attribute_exists":
-		path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_exist first arg")
-		fmt.Println("attribute_exists path:", FullPath(path.Parts, input))
-		_, exists := resolvePath(path.Parts, input)
-		return exists
+		return f.attributeExists(input)
+	case "attribute_not_exists":
+		return !f.attributeExists(input)
 	case "begins_with":
 		path := astutil.CastTo[*AttributePath](f.Args[0])
 		attr, exists := resolvePath(path.Parts, input)
@@ -434,8 +437,18 @@ func (f *FunctionCall) Eval(input Input) bool {
 		strVal := astutil.String(attr.Value)
 		prefix := astutil.String(f.Args[1])
 		return startsWith(strVal, prefix)
+	default:
+		panic("unsupported function")
 	}
-	return false
+}
+
+func (f *FunctionCall) attributeExists(input Input) bool {
+	if input.Document == nil {
+		return false
+	}
+	path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_exist first arg")
+	_, exists := resolvePath(path.Parts, input)
+	return exists
 }
 
 func startsWith(str, prefix string) bool {
