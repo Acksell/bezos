@@ -9,52 +9,42 @@
   )
 }
 
-// XXX: We should really refactor this to just construct the expression tree first,
-//      and then traverse to check errors afterwards
+// Modified and tidied version of Dynalite's PEG file
+// https://github.com/architect/dynalite/blob/b665c72c5e73ccdea09d64547e59cdeeae450333/db/conditionParser.pegjs
 
 Start
   = _ expr:OrConditionExpression _ {  
-      // c.checkMisusedSize(expr)
-      //todo { nestedPaths: nestedPaths, pathHeads: pathHeads }
-      // c.checkErrors()
       return expr, nil
     }
 
 OrConditionExpression
   = x:AndConditionExpression _ token:OrToken _ y:OrConditionExpression {
-      // c.checkMisusedSize(x)
-      // c.checkMisusedSize(y)
       return ast.NewOrCondition(x, y), nil
     }
   / expr:AndConditionExpression
 
 AndConditionExpression
   = x:NotConditionExpression _ AndToken _ y:AndConditionExpression {
-      // c.checkMisusedSize(x)
-      // c.checkMisusedSize(y)
       return ast.NewAndCondition(x, y), nil
     }
   / NotConditionExpression
 
 NotConditionExpression
   = token:NotToken _ expr:ParensConditionExpression {
-      // c.checkMisusedSize(expr)
       return ast.NewNotCondition(expr), nil
     }
   / ParensConditionExpression
 
 ParensConditionExpression
   = '(' _ '(' _ expr:OrConditionExpression _ ')' _ ')' {
-      // c.redundantParensError()
-      return expr, nil
+      // can handle gracefully but DDB doesn't so we fail here with same err msg
+      return expr, fmt.Errorf("The expression has redundant parentheses;")
     }
   / '(' _ '(' _ expr:ConditionExpression _ ')' _ ')' {
-      // c.redundantParensError()
-      // c.checkConditionErrors()
-      return expr, nil
+      // can handle gracefully but DDB doesn't so we fail here with same err msg
+      return expr, fmt.Errorf("The expression has redundant parentheses;")
     }
   / expr:ConditionExpression {
-      // c.checkConditionErrors()
       return expr, nil
     }
   / '(' _ expr:OrConditionExpression _ ')' {
@@ -63,17 +53,12 @@ ParensConditionExpression
 
 ConditionExpression
   = left:OperandParens _ comp:Comparator _ right:OperandParens {
-      // c.checkMisusedFunction([x, y])
-      // c.checkDistinct(comp, [x, y])
       return ast.NewComparison(comp, left, right), nil
     }
   / val:OperandParens _ BetweenToken _ low:OperandParens _ AndToken _ high:OperandParens {
-      // checkMisusedFunction([x, y, z])
-      // checkBetweenArgs(y, z)
       return ast.NewBetweenExpr(val, low, high), nil
     }
   / val:OperandParens _ token:InToken _ '(' _ container:FunctionArgumentList _ ')' {
-      // checkMisusedFunction([x].concat(args))
       return ast.NewContainsExpr(container, val), nil
     }
   / f:Function
@@ -88,8 +73,8 @@ Comparator
 
 OperandParens
   = '(' _ '(' _ op:Operand _ ')' _ ')' {
-      // redundantParensError()
-      return op, nil
+      // can handle gracefully but DDB doesn't so we fail here with same err msg
+      return op, fmt.Errorf("The expression has redundant parentheses")
     }
   / '(' _ op:Operand _ ')' {
       return op, nil
@@ -103,9 +88,7 @@ Operand
 
 Function
   = !ReservedWord head:IdentifierStart tail:IdentifierPart* _ '(' _ args:FunctionArgumentList _ ')' {
-      // checkMisusedFunction(args)
       name := astutil.HeadTailString(head, tail)
-      // attrType := checkFunction(name, args)
       return ast.NewFunctionCallExpr(name, args), nil
     }
 
@@ -121,7 +104,6 @@ ExpressionAttributeName
 
 ExpressionAttributeValue
   = !ReservedWord head:":" tail:IdentifierPart* {
-      // resolveAttrVal(head + tail.join(''))
       return ast.NewExpressionAttributeValue(string(c.text)), nil
     }
 
@@ -140,8 +122,8 @@ PathExpression
 GroupedPathExpression
   = Identifier
   / '(' _ '(' _ path:PathExpression _ ')' _ ')' {
-      // redundantParensError()
-      return path, nil
+      // can handle gracefully but DDB doesn't so we fail here with same err msg
+      return path, fmt.Errorf("The expression has redundant parentheses;")
     }
   / '(' _ path:PathExpression _ ')' {
       return path, nil

@@ -116,7 +116,6 @@ func (c *Comparison) Eval(input Input) bool {
 	case "<>":
 		return !leftVal.Equal(rightVal)
 	case ">":
-		// todo use generics. This assumes float comparison
 		return leftVal.GreaterThan(rightVal)
 	case "<":
 		return leftVal.LessThan(rightVal)
