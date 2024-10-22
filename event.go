@@ -1,4 +1,4 @@
-package norm
+package bezos
 
 // type CommandEvent struct {
 // 	Meta     EventMeta

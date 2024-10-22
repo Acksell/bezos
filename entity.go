@@ -1,4 +1,4 @@
-package norm
+package bezos
 
 import (
 	"time"

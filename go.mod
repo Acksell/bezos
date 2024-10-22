@@ -1,4 +1,4 @@
-module norm
+module bezos
 
 go 1.22.3
 
