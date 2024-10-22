@@ -2,7 +2,7 @@
 Work in progress.
 ## Current features
 - In-memory DynamoDB to be used in unit testing, without needing to spin up dynamodb-local in a docker container. This allows makes unit tests and integration tests separated only by a depdendency injection. This speeds up the debugging and testing of your core business logic significantly. There is no existing alternative currently for Go. The only library I know of is [Dynalite](https://github.com/architect/dynalite/), but it's written in Typescript.
-
+- A DynamoDB expression parser and AST that the in-memory db relies on.
 - A DynamoDB API wrapper that I find easier to understand and work with. 
 
 ## Intro
