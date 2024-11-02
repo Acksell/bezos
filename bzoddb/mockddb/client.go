@@ -17,13 +17,13 @@ var errNotFound = fmt.Errorf("not found")
 func NewStore(defs ...table.TableDefinition) *mockStore {
 	tables := make(map[string]*mockTable)
 	for _, t := range defs {
-		var gsis []*mockTable
+		gsis := make(map[string]*mockTable)
 		for _, gsi := range t.GSIs {
 			gsiTable := &mockTable{
 				definition: gsi,
 				store:      make(map[partitionKey]*btree.BTreeG[*document]),
 			}
-			gsis = append(gsis, gsiTable)
+			gsis[gsi.Name] = gsiTable
 		}
 		tables[t.Name] = &mockTable{
 			definition: t,
@@ -56,7 +56,7 @@ type mockTable struct {
 	// A store with partition key as primary key and a btree for sort keys.
 	// Probably overkill but the library wasn't too big, and API works well.
 	store map[partitionKey]*btree.BTreeG[*document]
-	gsis  []*mockTable
+	gsis  map[string]*mockTable
 }
 
 type partitionKey any
@@ -295,8 +295,35 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 		return nil, nil
 	}
 
+	// if gsi key attribute is changed, we need to delete the item from the gsi
+	// if gsi key attribute is present, we need to Put the item to the gsi
 	for _, gsi := range t.gsis {
-		gsi.PutItem(ctx, params, optFns...)
+		newPk, hasNewPk := params.Item[gsi.definition.KeyDefinitions.PartitionKey.Name]
+		if hasNewPk { // Always put item if PK is present.
+			if _, err := gsi.PutItem(ctx, params, optFns...); err != nil {
+				return nil, fmt.Errorf("put to gsi: %w", err)
+			}
+		}
+		if old == nil {
+			continue
+		}
+		var newSk, oldSk types.AttributeValue
+		if gsi.definition.KeyDefinitions.SortKey.Name != "" {
+			newSk = params.Item[gsi.definition.KeyDefinitions.SortKey.Name]
+			oldSk = old.value[gsi.definition.KeyDefinitions.SortKey.Name]
+		}
+		oldPk := old.value[gsi.definition.KeyDefinitions.PartitionKey.Name]
+		// todo test
+		if newPk != oldPk || newSk != oldSk { // GSI primary key changed or deleted, delete old document.
+			oldKey, err := gsi.extractPrimaryKey(old.value)
+			if err != nil {
+				return nil, err
+			}
+			// todo: any conditions needed here?
+			if _, err := gsi.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: params.TableName, Key: oldKey.DDB()}, optFns...); err != nil {
+				return nil, fmt.Errorf("delete from gsi: %w", err)
+			}
+		}
 	}
 
 	out := &dynamodb.PutItemOutput{}
