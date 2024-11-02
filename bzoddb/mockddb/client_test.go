@@ -83,6 +83,7 @@ func TestPutItem(t *testing.T) {
 		ctx := context.Background()
 		tabl, err := store.getTable(&singleTableDesign.Name)
 		require.NoError(t, err)
+		gsi := tabl.gsis["test-gsi"]
 
 		t.Run("is inserted to GSI", func(t *testing.T) {
 			item := map[string]types.AttributeValue{
@@ -97,7 +98,6 @@ func TestPutItem(t *testing.T) {
 			})
 			require.NoError(t, err, "should be able to insert item")
 
-			gsi := tabl.gsis["test-gsi"]
 			got, err := gsi.GetItem(ctx, &dynamodb.GetItemInput{
 				Key: map[string]types.AttributeValue{
 					"testgsipk": &types.AttributeValueMemberS{Value: "testgsi_pkval"},
@@ -109,6 +109,35 @@ func TestPutItem(t *testing.T) {
 			require.Equal(t, item, got.Item, "item should be inserted and fetchable via GetItem on GSI")
 		})
 		t.Run("deleted old and adds new item to GSI", func(t *testing.T) {
+			item := map[string]types.AttributeValue{
+				"pk":        &types.AttributeValueMemberS{Value: "test"},
+				"sk":        &types.AttributeValueMemberS{Value: "test"},
+				"testgsipk": &types.AttributeValueMemberS{Value: "testgsi_pkval"},
+				"testgsisk": &types.AttributeValueMemberS{Value: "testgsi_skval_NEW"},
+			}
+			_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+				Item:      item,
+				TableName: &singleTableDesign.Name,
+			})
+			require.NoError(t, err, "should be able to insert item")
+
+			_, err = gsi.GetItem(ctx, &dynamodb.GetItemInput{
+				Key: map[string]types.AttributeValue{
+					"testgsipk": &types.AttributeValueMemberS{Value: "testgsi_pkval"},
+					"testgsisk": &types.AttributeValueMemberS{Value: "testgsi_skval_NEW"},
+				},
+				TableName: &singleTableDesign.Name,
+			})
+			require.NoError(t, err, "expected to be found")
+
+			_, err = gsi.GetItem(ctx, &dynamodb.GetItemInput{
+				Key: map[string]types.AttributeValue{
+					"testgsipk": &types.AttributeValueMemberS{Value: "testgsi_pkval"},
+					"testgsisk": &types.AttributeValueMemberS{Value: "testgsi_skval"},
+				},
+				TableName: &singleTableDesign.Name,
+			})
+			require.Error(t, err, "expected to be deleted")
 
 		})
 	})

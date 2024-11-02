@@ -70,7 +70,6 @@ func less(l *document, r *document) bool {
 	if l.pk.Definition.SortKey.Kind != r.pk.Definition.SortKey.Kind {
 		panic("sort key kind mismatch") // should not happen
 	}
-	fmt.Println("less", l, r)
 	switch l.pk.Definition.SortKey.Kind {
 	case table.KeyKindS, table.KeyKindB:
 		return mustConvToString(l.pk.Values.SortKey) < mustConvToString(r.pk.Values.SortKey)
@@ -91,7 +90,6 @@ func (t *mockTable) extractPrimaryKey(item map[string]types.AttributeValue) (tab
 
 func (t *mockTable) getStore(pk partitionKey) *btree.BTreeG[*document] {
 	store, ok := t.store[pk]
-	fmt.Println("store", store, ok, pk)
 	if !ok {
 		store = btree.NewG(2, less)
 		t.store[pk] = store
@@ -271,9 +269,8 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 
 	store := t.getStore(pk.Values.PartitionKey)
 	// todo make concurrency safe - make topic queues
-	fmt.Println(store.Len())
 	doc, found := store.Get(&document{pk, nil})
-	fmt.Println("found", found, doc, pk.Values.PartitionKey, pk.Values.SortKey)
+
 	// only validate if document is found
 	if found && params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi, main table does it
 		condition := expressionparser.Condition{

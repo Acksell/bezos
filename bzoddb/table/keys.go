@@ -47,9 +47,9 @@ func (k PrimaryKey) DDB() map[string]types.AttributeValue {
 		panic(fmt.Errorf("key kind does not match dynamo value: %w", err))
 	}
 
-	sk, err := attributevalue.Marshal(k.Values.PartitionKey)
+	sk, err := attributevalue.Marshal(k.Values.SortKey)
 	if err != nil {
-		panic(fmt.Errorf("failed to marshal sort key of type %T with value %v: %w", k.Values.PartitionKey, k.Values.PartitionKey, err))
+		panic(fmt.Errorf("failed to marshal sort key of type %T with value %v: %w", k.Values.SortKey, k.Values.SortKey, err))
 	}
 	err = attributeMatchesDefinition(k.Definition.SortKey.Kind, sk)
 	if err != nil {
