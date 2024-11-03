@@ -1,4 +1,4 @@
-package mockddb
+package ddbstore
 
 import (
 	"fmt"

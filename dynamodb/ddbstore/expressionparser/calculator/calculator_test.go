@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bezos/bzoddb/expressionparser/calculator/ast"
+	"bezos/dynamodb/ddbstore/expressionparser/calculator/ast"
 	"testing"
 )
 

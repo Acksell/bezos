@@ -1,7 +1,7 @@
 package bzoddb
 
 import (
-	"bezos/bzoddb/table"
+	"bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 )

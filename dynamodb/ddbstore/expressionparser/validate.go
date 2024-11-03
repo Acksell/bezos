@@ -1,8 +1,8 @@
 package expressionparser
 
 import (
-	"bezos/bzoddb/expressionparser/ast"
-	"bezos/bzoddb/expressionparser/parser"
+	"bezos/dynamodb/ddbstore/expressionparser/ast"
+	"bezos/dynamodb/ddbstore/expressionparser/parser"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

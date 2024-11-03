@@ -1,7 +1,7 @@
 package bzoddb
 
 import (
-	"bezos/bzoddb/table"
+	"bezos/dynamodb/table"
 	"fmt"
 	"time"
 

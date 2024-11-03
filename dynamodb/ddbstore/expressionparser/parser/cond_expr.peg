@@ -4,8 +4,8 @@
   import (
     "strings"
 
-    "bezos/bzoddb/expressionparser/ast"
-    "bezos/bzoddb/expressionparser/astutil"
+    "bezos/dynamodb/ddbstore/expressionparser/ast"
+    "bezos/dynamodb/ddbstore/expressionparser/astutil"
   )
 }
 

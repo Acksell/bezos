@@ -1,8 +1,8 @@
-package mockddb
+package ddbstore
 
 import (
-	"bezos/bzoddb/expressionparser"
-	"bezos/bzoddb/table"
+	"bezos/dynamodb/ddbstore/expressionparser"
+	"bezos/dynamodb/table"
 	"context"
 	"fmt"
 

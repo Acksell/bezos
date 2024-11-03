@@ -1,6 +1,6 @@
 package bzoddb
 
-import "bezos/bzoddb/table"
+import "bezos/dynamodb/table"
 
 var _ Reader = &dynamock{}
 

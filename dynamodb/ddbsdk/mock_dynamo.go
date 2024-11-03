@@ -1,12 +1,12 @@
 package bzoddb
 
 import (
-	"bezos/bzoddb/mockddb"
-	"bezos/bzoddb/table"
+	"bezos/dynamodb/ddbstore"
+	"bezos/dynamodb/table"
 )
 
 func NewMock(defs ...table.TableDefinition) IO {
-	mock := mockddb.NewStore(defs...)
+	mock := ddbstore.NewStore(defs...)
 	// works if mockddb.NewStore() is a good enough mock of AWSDynamoClientV2 iface
 	// todo implement projection expressions
 	return New(mock)
