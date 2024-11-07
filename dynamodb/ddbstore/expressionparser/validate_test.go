@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestValidateCondition(t *testing.T) {
+func TestEvalCondition(t *testing.T) {
 	testCases := []struct {
 		name      string
 		cond      expression.ConditionBuilder
@@ -84,11 +84,21 @@ func TestValidateCondition(t *testing.T) {
 			expected:  false,
 			shouldErr: true,
 		},
+		{
+			name: "single expression attribute name comparison should work",
+			// aliasedName will be converted to an expression attribute name by the expression builder.
+			cond: expression.Name("aliasedName").Equal(expression.Value("123")),
+			doc: map[string]types.AttributeValue{
+				"aliasedName": &types.AttributeValueMemberS{Value: "123"},
+			},
+			expected: true,
+		},
 	}
 
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			fmt.Println("--------TEST CASE:", tc.name)
 			b := expression.NewBuilder().WithCondition(tc.cond)
 			expr, err := b.Build()
 			if err != nil {
@@ -101,7 +111,7 @@ func TestValidateCondition(t *testing.T) {
 			}
 			fmt.Println("CONDITION:", cond.Condition, "NAMES:", cond.ExpressionNames, "VALUES:", cond.ExpressionValues)
 
-			valid, err := ValidateCondition(cond, tc.doc)
+			valid, err := EvalCondition(cond, tc.doc)
 			if err != nil && !tc.shouldErr {
 				t.Fatalf("failed to validate condition: %v", err)
 			} else if err == nil && tc.shouldErr {

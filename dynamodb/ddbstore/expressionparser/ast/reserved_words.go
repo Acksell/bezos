@@ -8,6 +8,7 @@ func isReservedName(name string) bool {
 }
 
 // case insensitive
+// http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ReservedWords.html
 var resservedNames = map[string]struct{}{
 	"ABORT":          {},
 	"ABSOLUTE":       {},

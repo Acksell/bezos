@@ -5,12 +5,6 @@ import (
 	"fmt"
 )
 
-type Input struct {
-	Document         map[string]AttributeValue
-	ExpressionNames  map[string]string
-	ExpressionValues map[string]AttributeValue
-}
-
 // Condition is the root interface for all AST nodes for Conditions.
 //
 // DB uses parser for conditionexpression
@@ -27,10 +21,34 @@ type Expression interface {
 	GetValue(input Input) *Operand
 }
 
+type Input struct {
+	Document         map[string]AttributeValue
+	ExpressionNames  map[string]string
+	ExpressionValues map[string]AttributeValue
+
+	KeyNames TableKeyNames
+	Type     ConditionType
+}
+
 type AttributeValue struct {
 	Value any
 	Type  AttributeType
 }
+
+type TableKeyNames struct { // not sure I like the fact that this AST includes "table" logic
+	PartitionKeyName string
+	SortKeyName      string
+}
+type ConditionType string
+
+const (
+	// only non-key attributes allowed
+	QueryFilterExpression ConditionType = "filterExpression"
+	// only key attributes allowed
+	QueryKeyCondition ConditionType = "keyCondition"
+	// any attributes allowed
+	AttributeCondition ConditionType = "attributeCondition"
+)
 
 type Operand struct {
 	Value any
@@ -56,7 +74,7 @@ func (left *Operand) Equal(right *Operand) bool {
 		}
 		return true
 	case NUMBER, STRING, BINARY, BOOL, NULL:
-		fmt.Printf("left: %T%+v right: %T%+v (%T) eq: %v", left, left, right, right, right.Value, left.Value == right.Value)
+		fmt.Printf("left: %T%+v right: %T%+v (%T) eq: %v\n", left, left, right, right, right.Value, left.Value == right.Value)
 		return left.Value == right.Value
 	case MAP:
 		panic("cannot compare two maps")
@@ -106,22 +124,32 @@ type Comparison struct {
 	Right    Expression // right operand
 }
 
+const (
+	// Comparison operators
+	Equal          = "="
+	NotEqual       = "<>"
+	LessThan       = "<"
+	LessOrEqual    = "<="
+	GreaterThan    = ">"
+	GreaterOrEqual = ">="
+)
+
 func (c *Comparison) Eval(input Input) bool {
 	leftVal := c.Left.GetValue(input)
 	rightVal := c.Right.GetValue(input)
 
 	switch c.Operator {
-	case "=":
+	case Equal:
 		return leftVal.Equal(rightVal)
-	case "<>":
+	case NotEqual:
 		return !leftVal.Equal(rightVal)
-	case ">":
+	case GreaterThan:
 		return leftVal.GreaterThan(rightVal)
-	case "<":
+	case LessThan:
 		return leftVal.LessThan(rightVal)
-	case ">=":
+	case GreaterOrEqual:
 		return leftVal.GreaterThanOrEqual(rightVal)
-	case "<=":
+	case LessOrEqual:
 		return leftVal.LessThanOrEqual(rightVal)
 	default:
 		panic(fmt.Sprintf("unsupported operator %s", c.Operator))
@@ -196,6 +224,13 @@ type LogicalOp struct {
 	Right    Condition
 }
 
+const (
+	// Logical operators
+	AND = "AND"
+	OR  = "OR"
+	NOT = "NOT"
+)
+
 func (l *LogicalOp) Eval(input Input) bool {
 	switch l.Operator {
 	case "AND":
@@ -232,6 +267,20 @@ type AttributePath struct {
 
 // Ensure AttributePath implements Expression
 func (p *AttributePath) GetValue(input Input) *Operand {
+	switch input.Type {
+	case QueryKeyCondition:
+		if len(p.Parts) != 1 {
+			panic("attributes in key condition must be top level key attributes")
+		}
+		name := p.Parts[0].toString(input)
+		assertValidKeyAttrName(input, name)
+	case QueryFilterExpression:
+		if len(p.Parts) != 1 {
+			break // allow nested attrbutes, means it's not a key attribute.
+		}
+		name := p.Parts[0].toString(input)
+		assertValidFilterAttrName(input, name)
+	}
 	v, exists := resolvePath(p.Parts, input)
 	if !exists {
 		panic(fmt.Sprintf("attribute %s not found", FullPath(p.Parts, input)))
@@ -244,7 +293,7 @@ func FullPath(parts []*AttributePathPart, input Input) string {
 	var path string
 	for _, part := range parts {
 		if part.Identifier != nil {
-			path += part.Identifier.Resolve(input)
+			path += part.Identifier.GetName(input)
 		} else if part.Index != nil {
 			path += fmt.Sprintf("[%d]", *part.Index)
 		} else {
@@ -282,7 +331,7 @@ func (p *AttributePathPart) toString(input Input) string {
 	if p.Identifier == nil {
 		panic("called toString on nil Identifier")
 	}
-	return p.Identifier.Resolve(input)
+	return p.Identifier.GetName(input)
 }
 
 func (p *AttributePathPart) toInt() int {
@@ -304,7 +353,7 @@ func resolvePath(path []*AttributePathPart, input Input) (AttributeValue, bool) 
 	if attr, exists = input.Document[traversed]; !exists {
 		panic(fmt.Sprintf("attribute %s not found", traversed))
 	}
-	fmt.Println(attr, exists, traversed)
+	fmt.Println(input.Document, exists, traversed)
 
 	// follow the path
 	for i := 1; i < len(path); i++ {
@@ -422,13 +471,19 @@ func (f *FunctionCall) GetValue(input Input) *Operand {
 }
 
 func (f *FunctionCall) Eval(input Input) bool {
+	// todo this should be part of the parser or a validate function instead?
+	if f.FunctionName != "begins_with" {
+		if input.Type == QueryKeyCondition {
+			panic(fmt.Sprintf("function %q not allowed in key condition", f.FunctionName))
+		}
+	}
 	switch f.FunctionName {
 	case "attribute_exists":
 		return f.attributeExists(input)
 	case "attribute_not_exists":
 		return !f.attributeExists(input)
 	case "begins_with":
-		path := astutil.CastTo[*AttributePath](f.Args[0])
+		path := astutil.CastTo[*AttributePath](f.Args[0], "begins_with first arg")
 		attr, exists := resolvePath(path.Parts, input)
 		if !exists {
 			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
@@ -436,6 +491,32 @@ func (f *FunctionCall) Eval(input Input) bool {
 		strVal := astutil.String(attr.Value)
 		prefix := astutil.String(f.Args[1])
 		return startsWith(strVal, prefix)
+	case "attribute_type":
+		path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_type first arg")
+		attr, exists := resolvePath(path.Parts, input)
+		if !exists {
+			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
+		}
+		typ := f.Args[1].GetValue(input).Value
+		return string(attr.Type) == typ
+	case "contains":
+		container := astutil.CastTo[*AttributePath](f.Args[0], "contains first arg")
+		val := f.Args[1].GetValue(input)
+		attr, exists := resolvePath(container.Parts, input)
+		if !exists {
+			panic(fmt.Sprintf("attribute %s not found", FullPath(container.Parts, input)))
+		}
+		switch attr.Type {
+		case LIST, NUMBER_SET, STRING_SET, BINARY_SET:
+			for _, item := range astutil.ToSlice[any](attr.Value) {
+				if item == val.Value {
+					return true
+				}
+			}
+			return false
+		default:
+			panic(fmt.Sprintf("unsupported attribute type %s used in function 'contains'", attr.Type))
+		}
 	default:
 		panic("unsupported function")
 	}
@@ -454,16 +535,12 @@ func startsWith(str, prefix string) bool {
 	return len(str) >= len(prefix) && str[:len(prefix)] == prefix
 }
 
-func NewExpressionAttributeName(name string) *ExpressionAttributeName {
-	return &ExpressionAttributeName{Name: name}
-}
-
 type Identifier struct {
 	Name           *string
 	NameExpression *ExpressionAttributeName
 }
 
-func (i *Identifier) Resolve(input Input) string {
+func (i *Identifier) GetName(input Input) string {
 	if i.Name != nil {
 		return *i.Name
 	}
@@ -474,32 +551,50 @@ func (i *Identifier) Resolve(input Input) string {
 	return i.NameExpression.resolve(input)
 }
 
+func NewExpressionAttributeName(alias string) *ExpressionAttributeName {
+	return &ExpressionAttributeName{Alias: alias}
+}
+
 type ExpressionAttributeName struct {
-	Name string
+	Alias string
 }
 
 func (n *ExpressionAttributeName) resolve(input Input) string {
-	fmt.Println("trying to resolve expression attribute name", n.Name)
-	v, found := input.ExpressionNames[n.Name]
+	name, found := input.ExpressionNames[n.Alias]
 	if !found {
-		panic(fmt.Sprintf("expression attribute value %s not found", n.Name))
+		panic(fmt.Sprintf("expression attribute value %s not found", n.Alias))
 	}
-	fmt.Println("RESOLVED", n.Name, "to", v)
-	return v
+	switch input.Type {
+	case QueryKeyCondition:
+		assertValidKeyAttrName(input, name)
+	case QueryFilterExpression:
+		assertValidFilterAttrName(input, name)
+	}
+	return name
+}
+func assertValidKeyAttrName(input Input, name string) {
+	if input.KeyNames.PartitionKeyName != name || input.KeyNames.SortKeyName != name {
+		panic(fmt.Sprintf("attribute %s is not a key attribute", name))
+	}
+}
+func assertValidFilterAttrName(input Input, name string) {
+	if input.KeyNames.PartitionKeyName == name || input.KeyNames.SortKeyName == name {
+		panic(fmt.Sprintf("attribute %s is a key attribute, use it in key condition", name))
+	}
 }
 
-func NewExpressionAttributeValue(name string) *ExpressionAttributeValue {
-	return &ExpressionAttributeValue{Name: name}
+func NewExpressionAttributeValue(alias string) *ExpressionAttributeValue {
+	return &ExpressionAttributeValue{Alias: alias}
 }
 
 type ExpressionAttributeValue struct {
-	Name string
+	Alias string
 }
 
 func (v *ExpressionAttributeValue) GetValue(input Input) *Operand {
-	val, found := input.ExpressionValues[v.Name]
+	val, found := input.ExpressionValues[v.Alias]
 	if !found {
-		panic(fmt.Sprintf("expression attribute value %s not found", v.Name))
+		panic(fmt.Sprintf("expression attribute value %s not found", v.Alias))
 	}
 	return &Operand{Value: val.Value, Type: val.Type}
 }

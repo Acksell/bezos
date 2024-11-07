@@ -14,13 +14,7 @@ type Condition struct {
 	ExpressionValues map[string]types.AttributeValue
 }
 
-func ValidateCondition(c Condition, doc map[string]types.AttributeValue) (match bool, err error) {
-	// errs := make(errorsMap)
-	// p := newParser("", []byte(in), GlobalStore("errors", errs))
-	// parsed, err := p.parse(g)
-	// if err != nil {
-	// 	return false, err
-	// }
+func ParseCondition(c Condition) (cond ast.Condition, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// error message is stored in the panic value, because AST uses panics atm
@@ -28,14 +22,28 @@ func ValidateCondition(c Condition, doc map[string]types.AttributeValue) (match 
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-
-	parsed, err := parser.Parse("validateCondition", []byte(c.Condition))
+	parsed, err := parser.Parse("parseCondition", []byte(c.Condition))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	cond, ok := parsed.(ast.Condition)
 	if !ok {
-		return false, fmt.Errorf("expected ast.Condition, got %T", parsed)
+		return nil, fmt.Errorf("expected ast.Condition, got %T", parsed)
+	}
+	return cond, nil
+}
+
+func EvalCondition(c Condition, doc map[string]types.AttributeValue) (match bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			// error message is stored in the panic value, because AST uses panics atm
+			// even in Eval() method. Modifying err value here will return it to the caller.
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	cond, err := ParseCondition(c)
+	if err != nil {
+		return false, err
 	}
 	v := cond.Eval(ast.Input{
 		Document:         convertToASTVals(doc),
