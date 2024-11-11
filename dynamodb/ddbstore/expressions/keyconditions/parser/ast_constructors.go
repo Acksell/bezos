@@ -1,4 +1,4 @@
-package keyconditions
+package parser
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/astutil"

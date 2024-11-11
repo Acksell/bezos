@@ -1,7 +1,7 @@
 package ddbstore
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser"
+	"bezos/dynamodb/ddbstore/expressions/writeconditions"
 	"bezos/dynamodb/table"
 	"context"
 	"fmt"
@@ -273,12 +273,11 @@ func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, 
 
 	// only validate if document is found
 	if found && params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi, main table does it
-		condition := expressionparser.Condition{
-			Condition:        *params.ConditionExpression,
+		input := writeconditions.EvalInput{
 			ExpressionValues: params.ExpressionAttributeValues,
 			ExpressionNames:  params.ExpressionAttributeNames,
 		}
-		valid, err := expressionparser.ValidateCondition(condition, doc.value)
+		valid, err := writeconditions.Eval(*params.ConditionExpression, input, doc.value)
 		if err != nil {
 			return nil, err
 		}

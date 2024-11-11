@@ -1,10 +1,10 @@
 {
-  package writeconditions
+  package parser
 
   import (
     "strings"
 
-    ast "bezos/dynamodb/ddbstore/expressions/conditionast"
+    "bezos/dynamodb/ddbstore/expressions/writeconditions/ast"
     "bezos/dynamodb/ddbstore/expressions/astutil"
   )
 }

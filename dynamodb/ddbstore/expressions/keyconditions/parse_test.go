@@ -224,7 +224,7 @@ func TestKeyCondition(t *testing.T) {
 				ExpressionAttributeValues: expr.Values(),
 			}
 			fmt.Println("-----------------", tt.name, "expr::=", *expr.KeyCondition())
-			cond, err := ParseKeyCondition(*expr.KeyCondition(), in)
+			cond, err := Parse(*expr.KeyCondition(), in)
 			if err != nil && tt.isvalid {
 				t.Fatalf("unexpected error: %v", err)
 			}

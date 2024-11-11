@@ -2,18 +2,24 @@ package writeconditions
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/writeconditions/ast"
+	"bezos/dynamodb/ddbstore/expressions/writeconditions/parser"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-type ConditionInput struct {
-	Condition        string
+func Parse(condition string) (ast.Condition, error) {
+	return parser.ParseExpr(condition)
+}
+
+type EvalInput struct {
 	ExpressionNames  map[string]string
 	ExpressionValues map[string]types.AttributeValue
 }
 
-func ParseCondition(condition string) (cond ast.Condition, err error) {
+// todo use errors instead of panics for error messages?
+// todo expose a validate function to ast that parser can call? and thus avoid panics?
+func Eval(condition string, input EvalInput, doc map[string]types.AttributeValue) (match bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// error message is stored in the panic value, because AST uses panics atm
@@ -21,33 +27,13 @@ func ParseCondition(condition string) (cond ast.Condition, err error) {
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	// todo put in internal package?
-	parsed, err := Parse("parseCondition", []byte(condition))
-	if err != nil {
-		return nil, err
-	}
-	cond, ok := parsed.(ast.Condition)
-	if !ok {
-		return nil, fmt.Errorf("expected ast.Condition, got %T", parsed)
-	}
-	return cond, nil
-}
-
-func EvalCondition(c ConditionInput, doc map[string]types.AttributeValue) (match bool, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			// error message is stored in the panic value, because AST uses panics atm
-			// even in Eval() method. Modifying err value here will return it to the caller.
-			err = fmt.Errorf("%v", r)
-		}
-	}()
-	cond, err := ParseCondition(c.Condition)
+	cond, err := Parse(condition)
 	if err != nil {
 		return false, err
 	}
 	v := cond.Eval(ast.Input{
-		ExpressionNames:  c.ExpressionNames,
-		ExpressionValues: convertToASTVals(c.ExpressionValues),
+		ExpressionNames:  input.ExpressionNames,
+		ExpressionValues: convertToASTVals(input.ExpressionValues),
 	}, convertToASTVals(doc))
 	return v, nil
 }

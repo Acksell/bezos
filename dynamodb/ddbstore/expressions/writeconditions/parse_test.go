@@ -104,14 +104,13 @@ func TestEvalCondition(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to build expression: %v", err)
 			}
-			cond := ConditionInput{
-				Condition:        *expr.Condition(),
+			input := EvalInput{
 				ExpressionNames:  expr.Names(),
 				ExpressionValues: expr.Values(),
 			}
-			fmt.Println("CONDITION:", cond.Condition, "NAMES:", cond.ExpressionNames, "VALUES:", cond.ExpressionValues)
+			fmt.Println("CONDITION:", *expr.Condition(), "NAMES:", input.ExpressionNames, "VALUES:", input.ExpressionValues)
 
-			valid, err := EvalCondition(cond, tc.doc)
+			valid, err := Eval(*expr.Condition(), input, tc.doc)
 			if err != nil && !tc.shouldErr {
 				t.Fatalf("failed to validate condition: %v", err)
 			} else if err == nil && tc.shouldErr {

@@ -2,46 +2,27 @@ package keyconditions
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/parser"
 	"bezos/dynamodb/table"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// External API for the parser
+// External API for the parser.
 type KeyConditionParams struct {
 	ExpressionAttributeNames  map[string]string
-	ExpressionAttributeValues map[string]types.AttributeValue // should we really tie ourselves to aws sdk v2?
-	TableKeys                 table.PrimaryKeyDefinition      // should we really use the table package here?
+	ExpressionAttributeValues map[string]types.AttributeValue
+	TableKeys                 table.PrimaryKeyDefinition
 }
 
-// Internal API for the parser
-type keyConditionParserParams struct {
-	ExpressionKeyNames  map[string]string
-	ExpressionKeyValues map[string]ast.KeyValue
-	TableKeys           table.PrimaryKeyDefinition // can use internal type instead
+func Parse(expr string, params KeyConditionParams) (*ast.KeyCondition, error) {
+	parserParams := toParserParams(params)
+	return parser.ParseExpr(expr, *parserParams)
 }
 
-const (
-	globalStoreParamsKey = "keyCondParams"
-)
-
-func ParseKeyCondition(expr string, keyParams KeyConditionParams) (*ast.KeyCondition, error) {
-	parserParams := toParserParams(keyParams)
-	// todo put in internal package?
-	v, err := Parse("keyConditionParser", []byte(expr), GlobalStore(globalStoreParamsKey, parserParams))
-	if err != nil {
-		return nil, err
-	}
-	ast, ok := v.(*ast.KeyCondition)
-	if !ok {
-		return nil, fmt.Errorf("expected *ast.KeyCondition, got %T", v)
-	}
-	return ast, nil
-}
-
-func toParserParams(params KeyConditionParams) *keyConditionParserParams {
-	return &keyConditionParserParams{
+func toParserParams(params KeyConditionParams) *parser.KeyConditionParserParams {
+	return &parser.KeyConditionParserParams{
 		ExpressionKeyNames:  params.ExpressionAttributeNames,
 		ExpressionKeyValues: toKeyValues(params.ExpressionAttributeValues),
 		TableKeys:           params.TableKeys,

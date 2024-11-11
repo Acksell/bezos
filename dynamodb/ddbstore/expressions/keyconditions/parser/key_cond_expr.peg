@@ -1,5 +1,5 @@
 {
-    package keyconditions
+    package parser
 
     import (
         "fmt"
@@ -9,12 +9,12 @@
         "bezos/dynamodb/ddbstore/expressions/astutil"
     )
 
-    func (c *current) paramsFromStore() *keyConditionParserParams {
+    func (c *current) paramsFromStore() *KeyConditionParserParams {
         v, found := c.globalStore[globalStoreParamsKey]
         if !found {
             panic("no key condition parameters found in parser")
         }
-        params, ok := v.(*keyConditionParserParams)
+        params, ok := v.(*KeyConditionParserParams)
         if !ok {
             panic(fmt.Sprintf("got params type %T, want %T", v, params))
         }

@@ -1,4 +1,4 @@
-package keyconditions
+package parser
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
@@ -15,7 +15,7 @@ type ambiguousKeyCondition struct {
 	Right *rawEqualCondition
 }
 
-func (c *ambiguousKeyCondition) Disambiguate(params *keyConditionParserParams) (*ast.KeyCondition, error) {
+func (c *ambiguousKeyCondition) Disambiguate(params *KeyConditionParserParams) (*ast.KeyCondition, error) {
 	pk := params.TableKeys.PartitionKey.Name
 	sk := params.TableKeys.SortKey.Name
 	leftname := c.Left.Identifier.GetName()
