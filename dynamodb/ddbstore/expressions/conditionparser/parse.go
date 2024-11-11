@@ -1,7 +1,7 @@
 package conditionparser
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/conditionast"
+	"bezos/dynamodb/ddbstore/expressions/conditionast"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

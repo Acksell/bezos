@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"bezos/dynamodb/ddbstore/expressionparser/astutil"
-	ast "bezos/dynamodb/ddbstore/expressionparser/conditionast"
+	"bezos/dynamodb/ddbstore/expressions/astutil"
+	ast "bezos/dynamodb/ddbstore/expressions/conditionast"
 )
 
 var g = &grammar{

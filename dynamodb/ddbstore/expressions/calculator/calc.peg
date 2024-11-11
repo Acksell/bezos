@@ -1,7 +1,7 @@
 {
 	package main
 
-	import "bezos/dynamodb/ddbstore/expressionparser/calculator/ast"
+	import "bezos/dynamodb/ddbstore/expressions/calculator/ast"
 
 	func main() {
 		if len(os.Args) != 2 {

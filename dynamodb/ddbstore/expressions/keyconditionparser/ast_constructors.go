@@ -1,8 +1,8 @@
 package keyconditionparser
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/astutil"
-	"bezos/dynamodb/ddbstore/expressionparser/keyconditionast"
+	"bezos/dynamodb/ddbstore/expressions/astutil"
+	"bezos/dynamodb/ddbstore/expressions/keyconditionast"
 	"bezos/dynamodb/table"
 	"fmt"
 )

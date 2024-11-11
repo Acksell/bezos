@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/astutil"
+	"bezos/dynamodb/ddbstore/expressions/astutil"
 )
 
 type Node interface {

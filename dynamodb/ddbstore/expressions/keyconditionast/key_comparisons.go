@@ -1,7 +1,7 @@
 package keyconditionast
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/astutil"
+	"bezos/dynamodb/ddbstore/expressions/astutil"
 	"fmt"
 )
 

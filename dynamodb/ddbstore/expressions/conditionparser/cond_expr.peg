@@ -4,8 +4,8 @@
   import (
     "strings"
 
-    ast "bezos/dynamodb/ddbstore/expressionparser/conditionast"
-    "bezos/dynamodb/ddbstore/expressionparser/astutil"
+    ast "bezos/dynamodb/ddbstore/expressions/conditionast"
+    "bezos/dynamodb/ddbstore/expressions/astutil"
   )
 }
 

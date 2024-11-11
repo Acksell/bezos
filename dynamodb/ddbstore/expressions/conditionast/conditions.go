@@ -5,7 +5,7 @@ It is not used for queries. For queries, use keyconditionast, filterexpressionas
 package conditionast
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/astutil"
+	"bezos/dynamodb/ddbstore/expressions/astutil"
 	"fmt"
 )
 
