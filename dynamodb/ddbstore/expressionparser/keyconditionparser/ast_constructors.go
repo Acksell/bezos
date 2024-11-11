@@ -22,6 +22,9 @@ func fromPKSK(part, sort any, table table.PrimaryKeyDefinition) (*keyconditionas
 }
 
 func verifyIdentifierAgainstTable(name string, table table.PrimaryKeyDefinition) error {
+	if astutil.IsReservedName(name) {
+		return fmt.Errorf("name %q is a reserved word", name)
+	}
 	if table.PartitionKey.Name != name && table.SortKey.Name != name {
 		return fmt.Errorf("name %q is not a key in this table", name)
 	}
@@ -29,6 +32,9 @@ func verifyIdentifierAgainstTable(name string, table table.PrimaryKeyDefinition)
 }
 
 func verifyPK(name string, table table.PrimaryKeyDefinition) error {
+	if astutil.IsReservedName(name) {
+		return fmt.Errorf("name %q is a reserved word", name)
+	}
 	if got, want := table.PartitionKey.Name, name; got != want {
 		return fmt.Errorf("name %q is not a partition key in this table, expected %q", got, want)
 	}
@@ -36,6 +42,9 @@ func verifyPK(name string, table table.PrimaryKeyDefinition) error {
 }
 
 func verifySK(name string, table table.PrimaryKeyDefinition) error {
+	if astutil.IsReservedName(name) {
+		return fmt.Errorf("name %q is a reserved word", name)
+	}
 	if got, want := table.SortKey.Name, name; got != want {
 		return fmt.Errorf("name %q is not a sort key in this table, expected %q", got, want)
 	}

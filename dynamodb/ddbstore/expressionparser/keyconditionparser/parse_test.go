@@ -36,6 +36,12 @@ func TestKeyCondition(t *testing.T) {
 			isvalid:  true,
 		},
 		{
+			name:     "pk is reserved name", // (just one of hundreds, see IsReservedName function)
+			cond:     expression.KeyEqual(expression.Key("and"), expression.Value("abc")),
+			keyNames: table.PrimaryKeyDefinition{PartitionKey: table.KeyDef{Name: "and", Kind: table.KeyKindS}},
+			isvalid:  false,
+		},
+		{
 			name:     "correct pk - with only pk name in table",
 			cond:     expression.KeyEqual(expression.Key("pk"), expression.Value("abc")),
 			keyNames: tableKeysOnlyPK,
@@ -217,7 +223,7 @@ func TestKeyCondition(t *testing.T) {
 				ExpressionAttributeNames:  expr.Names(),
 				ExpressionAttributeValues: expr.Values(),
 			}
-			fmt.Println("-----------------v", tt.name, "*expr.KeyCondition::=", *expr.KeyCondition())
+			fmt.Println("-----------------", tt.name, "expr::=", *expr.KeyCondition())
 			cond, err := ParseKeyCondition(*expr.KeyCondition(), in)
 			if err != nil && tt.isvalid {
 				t.Fatalf("unexpected error: %v", err)

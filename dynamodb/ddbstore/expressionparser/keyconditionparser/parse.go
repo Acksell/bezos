@@ -28,6 +28,7 @@ const (
 
 func ParseKeyCondition(expr string, keyParams KeyConditionParams) (*keyconditionast.KeyCondition, error) {
 	parserParams := toParserParams(keyParams)
+	// todo put in internal package?
 	v, err := Parse("keyConditionParser", []byte(expr), GlobalStore(globalStoreParamsKey, parserParams))
 	if err != nil {
 		return nil, err
