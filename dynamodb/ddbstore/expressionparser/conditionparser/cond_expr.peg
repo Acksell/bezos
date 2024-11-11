@@ -1,10 +1,10 @@
 {
-  package parser
+  package conditionparser
 
   import (
     "strings"
 
-    "bezos/dynamodb/ddbstore/expressionparser/ast"
+    ast "bezos/dynamodb/ddbstore/expressionparser/conditionast"
     "bezos/dynamodb/ddbstore/expressionparser/astutil"
   )
 }

@@ -1,20 +1,19 @@
-package expressionparser
+package conditionparser
 
 import (
-	"bezos/dynamodb/ddbstore/expressionparser/ast"
-	"bezos/dynamodb/ddbstore/expressionparser/parser"
+	"bezos/dynamodb/ddbstore/expressionparser/conditionast"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-type Condition struct {
+type ConditionInput struct {
 	Condition        string
 	ExpressionNames  map[string]string
 	ExpressionValues map[string]types.AttributeValue
 }
 
-func ParseCondition(c Condition) (cond ast.Condition, err error) {
+func ParseCondition(condition string) (cond conditionast.Condition, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// error message is stored in the panic value, because AST uses panics atm
@@ -22,18 +21,19 @@ func ParseCondition(c Condition) (cond ast.Condition, err error) {
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	parsed, err := parser.Parse("parseCondition", []byte(c.Condition))
+	// todo put in internal package?
+	parsed, err := Parse("parseCondition", []byte(condition))
 	if err != nil {
 		return nil, err
 	}
-	cond, ok := parsed.(ast.Condition)
+	cond, ok := parsed.(conditionast.Condition)
 	if !ok {
 		return nil, fmt.Errorf("expected ast.Condition, got %T", parsed)
 	}
 	return cond, nil
 }
 
-func EvalCondition(c Condition, doc map[string]types.AttributeValue) (match bool, err error) {
+func EvalCondition(c ConditionInput, doc map[string]types.AttributeValue) (match bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// error message is stored in the panic value, because AST uses panics atm
@@ -41,82 +41,81 @@ func EvalCondition(c Condition, doc map[string]types.AttributeValue) (match bool
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	cond, err := ParseCondition(c)
+	cond, err := ParseCondition(c.Condition)
 	if err != nil {
 		return false, err
 	}
-	v := cond.Eval(ast.Input{
-		Document:         convertToASTVals(doc),
+	v := cond.Eval(conditionast.Input{
 		ExpressionNames:  c.ExpressionNames,
 		ExpressionValues: convertToASTVals(c.ExpressionValues),
-	})
+	}, convertToASTVals(doc))
 	return v, nil
 }
 
 // AST package uses internal types in order to decouple it from AWS DDB SDK versions.
-func convertToASTVals(vals map[string]types.AttributeValue) map[string]ast.AttributeValue {
-	astMap := make(map[string]ast.AttributeValue)
+func convertToASTVals(vals map[string]types.AttributeValue) map[string]conditionast.AttributeValue {
+	astMap := make(map[string]conditionast.AttributeValue)
 	for k, v := range vals {
 		astMap[k] = convertToASTVal(v)
 	}
 	return astMap
 }
 
-func convertToASTVal(val types.AttributeValue) ast.AttributeValue {
+func convertToASTVal(val types.AttributeValue) conditionast.AttributeValue {
 	switch v := val.(type) {
 	case *types.AttributeValueMemberM:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: convertToASTVals(v.Value),
-			Type:  ast.MAP,
+			Type:  conditionast.MAP,
 		}
 	case *types.AttributeValueMemberL:
-		values := make([]ast.AttributeValue, 0, len(v.Value))
+		values := make([]conditionast.AttributeValue, 0, len(v.Value))
 		for _, val := range v.Value {
 			values = append(values, convertToASTVal(val))
 		}
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: values,
-			Type:  ast.LIST,
+			Type:  conditionast.LIST,
 		}
 	case *types.AttributeValueMemberS:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.STRING,
+			Type:  conditionast.STRING,
 		}
 	case *types.AttributeValueMemberN:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.NUMBER,
+			Type:  conditionast.NUMBER,
 		}
 	case *types.AttributeValueMemberB:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.BINARY,
+			Type:  conditionast.BINARY,
 		}
 	case *types.AttributeValueMemberBOOL:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.BOOL,
+			Type:  conditionast.BOOL,
 		}
 	case *types.AttributeValueMemberNULL:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: nil,
-			Type:  ast.NULL,
+			Type:  conditionast.NULL,
 		}
 	case *types.AttributeValueMemberSS:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.STRING_SET,
+			Type:  conditionast.STRING_SET,
 		}
 	case *types.AttributeValueMemberNS:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.NUMBER_SET,
+			Type:  conditionast.NUMBER_SET,
 		}
 	case *types.AttributeValueMemberBS:
-		return ast.AttributeValue{
+		return conditionast.AttributeValue{
 			Value: v.Value,
-			Type:  ast.BINARY_SET,
+			Type:  conditionast.BINARY_SET,
 		}
 	default:
 		panic(fmt.Sprintf("unsupported attribute type %T", v))

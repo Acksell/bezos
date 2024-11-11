@@ -1,8 +1,8 @@
-package ast
+package astutil
 
 import "strings"
 
-func isReservedName(name string) bool {
+func IsReservedName(name string) bool {
 	_, ok := resservedNames[strings.ToUpper(name)]
 	return ok
 }

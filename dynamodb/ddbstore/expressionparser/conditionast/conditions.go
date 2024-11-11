@@ -1,4 +1,8 @@
-package ast
+/*
+conditionast package contains the AST for condition expressions in DynamoDB writes/updates.
+It is not used for queries. For queries, use keyconditionast, filterexpressionast & projectionexpressionast.
+*/
+package conditionast
 
 import (
 	"bezos/dynamodb/ddbstore/expressionparser/astutil"
@@ -12,22 +16,24 @@ import (
 // interpreting and evaluating the condition
 // against a given DDB document
 type Condition interface {
-	Eval(input Input) bool
+	// Eval evaluates the condition against a given document
+	Eval(input Input, doc map[string]AttributeValue) bool
+
+	// Traverse(visitor Visitor, input Input)
 }
 
 // Expression is an interface for that is used as operands in comparisons and function calls.
 type Expression interface {
 	// GetValue returns an operand to be used in conditions
-	GetValue(input Input) *Operand
+	GetValue(input Input, doc map[string]AttributeValue) *Operand
+
+	// Traverse(visitor Visitor, input Input)
 }
 
+// todo only use in parser?
 type Input struct {
-	Document         map[string]AttributeValue
 	ExpressionNames  map[string]string
 	ExpressionValues map[string]AttributeValue
-
-	KeyNames TableKeyNames
-	Type     ConditionType
 }
 
 type AttributeValue struct {
@@ -35,22 +41,7 @@ type AttributeValue struct {
 	Type  AttributeType
 }
 
-type TableKeyNames struct { // not sure I like the fact that this AST includes "table" logic
-	PartitionKeyName string
-	SortKeyName      string
-}
-type ConditionType string
-
-const (
-	// only non-key attributes allowed
-	QueryFilterExpression ConditionType = "filterExpression"
-	// only key attributes allowed
-	QueryKeyCondition ConditionType = "keyCondition"
-	// any attributes allowed
-	AttributeCondition ConditionType = "attributeCondition"
-)
-
-type Operand struct {
+type Operand struct { // todo, combine with AttributeValue?
 	Value any
 	Type  AttributeType
 }
@@ -134,9 +125,9 @@ const (
 	GreaterOrEqual = ">="
 )
 
-func (c *Comparison) Eval(input Input) bool {
-	leftVal := c.Left.GetValue(input)
-	rightVal := c.Right.GetValue(input)
+func (c *Comparison) Eval(input Input, doc map[string]AttributeValue) bool {
+	leftVal := c.Left.GetValue(input, doc)
+	rightVal := c.Right.GetValue(input, doc)
 
 	switch c.Operator {
 	case Equal:
@@ -163,13 +154,13 @@ func NewBetweenExpr(val, low, high any) *BetweenExpr {
 	return &BetweenExpr{v, lo, hi}
 }
 
-func (b *BetweenExpr) Eval(input Input) bool {
-	lo := b.Low.GetValue(input)
-	hi := b.High.GetValue(input)
+func (b *BetweenExpr) Eval(input Input, doc map[string]AttributeValue) bool {
+	lo := b.Low.GetValue(input, doc)
+	hi := b.High.GetValue(input, doc)
 	if lo.GreaterThan(hi) {
 		panic(fmt.Sprintf("low must be less than or equal to high: got %v > %v", b.Low, b.High))
 	}
-	val := b.Val.GetValue(input)
+	val := b.Val.GetValue(input, doc)
 	return val.GreaterThanOrEqual(lo) && val.LessThanOrEqual(hi)
 }
 
@@ -185,10 +176,10 @@ func NewContainsExpr(container, val any) *ContainsExpr {
 	return &ContainsExpr{c, v}
 }
 
-func (c *ContainsExpr) Eval(input Input) bool {
-	val := c.Val.GetValue(input)
+func (c *ContainsExpr) Eval(input Input, doc map[string]AttributeValue) bool {
+	val := c.Val.GetValue(input, doc)
 	for _, item := range c.Container {
-		if item.GetValue(input) == val {
+		if item.GetValue(input, doc) == val {
 			return true
 		}
 	}
@@ -231,14 +222,14 @@ const (
 	NOT = "NOT"
 )
 
-func (l *LogicalOp) Eval(input Input) bool {
+func (l *LogicalOp) Eval(input Input, doc map[string]AttributeValue) bool {
 	switch l.Operator {
 	case "AND":
-		return l.Left.Eval(input) && l.Right.Eval(input)
+		return l.Left.Eval(input, doc) && l.Right.Eval(input, doc)
 	case "OR":
-		return l.Left.Eval(input) || l.Right.Eval(input)
+		return l.Left.Eval(input, doc) || l.Right.Eval(input, doc)
 	case "NOT":
-		return !l.Left.Eval(input)
+		return !l.Left.Eval(input, doc)
 	}
 	return false
 }
@@ -266,22 +257,8 @@ type AttributePath struct {
 }
 
 // Ensure AttributePath implements Expression
-func (p *AttributePath) GetValue(input Input) *Operand {
-	switch input.Type {
-	case QueryKeyCondition:
-		if len(p.Parts) != 1 {
-			panic("attributes in key condition must be top level key attributes")
-		}
-		name := p.Parts[0].toString(input)
-		assertValidKeyAttrName(input, name)
-	case QueryFilterExpression:
-		if len(p.Parts) != 1 {
-			break // allow nested attrbutes, means it's not a key attribute.
-		}
-		name := p.Parts[0].toString(input)
-		assertValidFilterAttrName(input, name)
-	}
-	v, exists := resolvePath(p.Parts, input)
+func (p *AttributePath) GetValue(input Input, doc map[string]AttributeValue) *Operand {
+	v, exists := resolvePath(p.Parts, input, doc)
 	if !exists {
 		panic(fmt.Sprintf("attribute %s not found", FullPath(p.Parts, input)))
 	}
@@ -308,7 +285,7 @@ func NewAttributePathPart(p any) *AttributePathPart {
 	case string:
 		// todo: verify that each pathpart needs validation, or if just the first pathpart needs it.
 		// e.g. it's unclear whether the path "comment.text" is valid (both comment and text are reserved words).
-		if isReservedName(v) {
+		if astutil.IsReservedName(v) {
 			panic(fmt.Sprintf("attribute name %q is reserved, use ExpressionAttributeNames instead", v))
 		}
 		return &AttributePathPart{Identifier: &Identifier{Name: &v}}
@@ -341,28 +318,27 @@ func (p *AttributePathPart) toInt() int {
 	return *p.Index
 }
 
-func resolvePath(path []*AttributePathPart, input Input) (AttributeValue, bool) {
+func resolvePath(path []*AttributePathPart, input Input, doc map[string]AttributeValue) (AttributeValue, bool) {
 	if len(path) == 0 {
 		panic("empty path")
 	}
-
 	// start with the document
 	var attr AttributeValue
 	var exists bool
 	traversed := path[0].toString(input)
-	if attr, exists = input.Document[traversed]; !exists {
+	if doc == nil {
+		panic("document is nil, can't resolve path to attributevalue")
+	}
+	if attr, exists = doc[traversed]; !exists {
 		panic(fmt.Sprintf("attribute %s not found", traversed))
 	}
-	fmt.Println(input.Document, exists, traversed)
 
 	// follow the path
 	for i := 1; i < len(path); i++ {
-		fmt.Println("ITERATE", i)
 		part := path[i]
 		switch attr.Type {
 		case MAP:
 			next := part.toString(input)
-			fmt.Println("next:", next)
 			attr, exists = astutil.CastTo[map[string]AttributeValue](attr.Value)[next]
 			traversed += "." + next
 			if !exists {
@@ -380,8 +356,6 @@ func resolvePath(path []*AttributePathPart, input Input) (AttributeValue, bool) 
 			panic(fmt.Sprintf("unresolved path, attribute at path %s is not map or list got %T", traversed, attr.Value))
 		}
 	}
-
-	fmt.Println(attr, exists, traversed)
 
 	return attr, exists
 }
@@ -441,12 +415,12 @@ func NewFunctionCallExpr(namev, argsv any) *FunctionCall {
 // and name!="size" can only be used in Eval.
 // This is done instead of an explicit grammar
 // for more custom error messages.
-func (f *FunctionCall) GetValue(input Input) *Operand {
+func (f *FunctionCall) GetValue(input Input, doc map[string]AttributeValue) *Operand {
 	switch f.FunctionName {
 	case "size":
 		path := astutil.CastTo[*AttributePath](f.Args[0], "size first arg")
 		// path
-		attr, exists := resolvePath(path.Parts, input)
+		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
 			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
 		}
@@ -470,21 +444,15 @@ func (f *FunctionCall) GetValue(input Input) *Operand {
 	}
 }
 
-func (f *FunctionCall) Eval(input Input) bool {
-	// todo this should be part of the parser or a validate function instead?
-	if f.FunctionName != "begins_with" {
-		if input.Type == QueryKeyCondition {
-			panic(fmt.Sprintf("function %q not allowed in key condition", f.FunctionName))
-		}
-	}
+func (f *FunctionCall) Eval(input Input, doc map[string]AttributeValue) bool {
 	switch f.FunctionName {
 	case "attribute_exists":
-		return f.attributeExists(input)
+		return f.attributeExists(input, doc)
 	case "attribute_not_exists":
-		return !f.attributeExists(input)
+		return !f.attributeExists(input, doc)
 	case "begins_with":
 		path := astutil.CastTo[*AttributePath](f.Args[0], "begins_with first arg")
-		attr, exists := resolvePath(path.Parts, input)
+		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
 			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
 		}
@@ -493,16 +461,16 @@ func (f *FunctionCall) Eval(input Input) bool {
 		return startsWith(strVal, prefix)
 	case "attribute_type":
 		path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_type first arg")
-		attr, exists := resolvePath(path.Parts, input)
+		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
 			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
 		}
-		typ := f.Args[1].GetValue(input).Value
+		typ := f.Args[1].GetValue(input, doc).Value
 		return string(attr.Type) == typ
 	case "contains":
 		container := astutil.CastTo[*AttributePath](f.Args[0], "contains first arg")
-		val := f.Args[1].GetValue(input)
-		attr, exists := resolvePath(container.Parts, input)
+		val := f.Args[1].GetValue(input, doc)
+		attr, exists := resolvePath(container.Parts, input, doc)
 		if !exists {
 			panic(fmt.Sprintf("attribute %s not found", FullPath(container.Parts, input)))
 		}
@@ -522,12 +490,12 @@ func (f *FunctionCall) Eval(input Input) bool {
 	}
 }
 
-func (f *FunctionCall) attributeExists(input Input) bool {
-	if input.Document == nil {
+func (f *FunctionCall) attributeExists(input Input, doc map[string]AttributeValue) bool {
+	if doc == nil {
 		return false
 	}
 	path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_exist first arg")
-	_, exists := resolvePath(path.Parts, input)
+	_, exists := resolvePath(path.Parts, input, doc)
 	return exists
 }
 
@@ -564,23 +532,7 @@ func (n *ExpressionAttributeName) resolve(input Input) string {
 	if !found {
 		panic(fmt.Sprintf("expression attribute value %s not found", n.Alias))
 	}
-	switch input.Type {
-	case QueryKeyCondition:
-		assertValidKeyAttrName(input, name)
-	case QueryFilterExpression:
-		assertValidFilterAttrName(input, name)
-	}
 	return name
-}
-func assertValidKeyAttrName(input Input, name string) {
-	if input.KeyNames.PartitionKeyName != name || input.KeyNames.SortKeyName != name {
-		panic(fmt.Sprintf("attribute %s is not a key attribute", name))
-	}
-}
-func assertValidFilterAttrName(input Input, name string) {
-	if input.KeyNames.PartitionKeyName == name || input.KeyNames.SortKeyName == name {
-		panic(fmt.Sprintf("attribute %s is a key attribute, use it in key condition", name))
-	}
 }
 
 func NewExpressionAttributeValue(alias string) *ExpressionAttributeValue {
@@ -591,7 +543,7 @@ type ExpressionAttributeValue struct {
 	Alias string
 }
 
-func (v *ExpressionAttributeValue) GetValue(input Input) *Operand {
+func (v *ExpressionAttributeValue) GetValue(input Input, doc map[string]AttributeValue) *Operand {
 	val, found := input.ExpressionValues[v.Alias]
 	if !found {
 		panic(fmt.Sprintf("expression attribute value %s not found", v.Alias))

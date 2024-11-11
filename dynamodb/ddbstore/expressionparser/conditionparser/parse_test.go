@@ -1,4 +1,4 @@
-package expressionparser
+package conditionparser
 
 import (
 	"fmt"
@@ -104,7 +104,7 @@ func TestEvalCondition(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to build expression: %v", err)
 			}
-			cond := Condition{
+			cond := ConditionInput{
 				Condition:        *expr.Condition(),
 				ExpressionNames:  expr.Names(),
 				ExpressionValues: expr.Values(),
