@@ -1,11 +1,11 @@
 {
-    package keyconditionparser
+    package keyconditions
 
     import (
         "fmt"
         "strings"
 
-        "bezos/dynamodb/ddbstore/expressions/keyconditionast"
+        "bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
         "bezos/dynamodb/ddbstore/expressions/astutil"
     )
 
@@ -21,7 +21,7 @@
         return params
     }
 
-    func (c *current) resolveAmbiguousKeyCondition(left, right any) (*keyconditionast.KeyCondition, error) {
+    func (c *current) resolveAmbiguousKeyCondition(left, right any) (*ast.KeyCondition, error) {
         // Need to disambiguate between PK and SK if they are both using
         // the "=" operation.
         // Use global store to fetch table key information
@@ -72,15 +72,15 @@ EqualsCondition
 
 EqualsConditionNoParens
   = name:Identifier _ EqualsComparator _ equals:KeyValue {
-        n := astutil.CastTo[keyconditionast.Identifier](name)
-        eq := astutil.CastTo[keyconditionast.Value](equals)
+        n := astutil.CastTo[ast.Identifier](name)
+        eq := astutil.CastTo[ast.Value](equals)
         return &rawEqualCondition{n, eq}, nil
     }
 
 Identifier
   = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
         name := astutil.HeadTailString(head, tail)
-        return keyconditionast.RawName{name}, verifyIdentifierAgainstTable(name, c.paramsFromStore().TableKeys)
+        return ast.RawName{name}, verifyIdentifierAgainstTable(name, c.paramsFromStore().TableKeys)
     }
   / ExpressionAttributeName
 
@@ -99,7 +99,7 @@ ExpressionAttributeName
         if !found {
             return nil, fmt.Errorf("unresolved expression attribute name %q", alias)
         }
-        return keyconditionast.NewExpressionAttributeName(string(c.text), resolved), verifyIdentifierAgainstTable(resolved, c.paramsFromStore().TableKeys)
+        return ast.NewExpressionAttributeName(string(c.text), resolved), verifyIdentifierAgainstTable(resolved, c.paramsFromStore().TableKeys)
     }
 
 KeyValue
@@ -112,7 +112,7 @@ ExpressionAttributeValue
         if !found {
             return nil, fmt.Errorf("unresolved expression attribute value %q", alias)
         }
-        return keyconditionast.NewExpressionAttributeValue(string(c.text), resolved), nil
+        return ast.NewExpressionAttributeValue(string(c.text), resolved), nil
     }
 
 SKRangeCondition
@@ -133,26 +133,26 @@ SKRangeConditionNoParens
 
 RangeComparison
   = key:Identifier _ comp:RangeComparator _ val:KeyValue {
-        k := astutil.CastTo[keyconditionast.Identifier](key)
-        cmp := keyconditionast.KeyComparator(string(comp.([]byte)))
-        v := astutil.CastTo[keyconditionast.Value](val)
-        return keyconditionast.NewComparisonCondition(k, cmp, v), nil
+        k := astutil.CastTo[ast.Identifier](key)
+        cmp := ast.KeyComparator(string(comp.([]byte)))
+        v := astutil.CastTo[ast.Value](val)
+        return ast.NewComparisonCondition(k, cmp, v), nil
     }
 
 BeginsWithFunction
   = _ BeginsWithToken _ '(' _ key:Identifier _ ',' _ prefix:KeyValue ')' { 
         // unclear whether `prefix` needs to be an expression attribute value or can be a constant string
-        k := astutil.CastTo[keyconditionast.Identifier](key)
-        pfx := astutil.CastTo[keyconditionast.Value](prefix)
-        return keyconditionast.NewBeginsWithCondition(k, pfx), nil
+        k := astutil.CastTo[ast.Identifier](key)
+        pfx := astutil.CastTo[ast.Value](prefix)
+        return ast.NewBeginsWithCondition(k, pfx), nil
     }
 
 BetweenOperation
   = !ReservedWord _ key:Identifier _ BetweenToken _ low:KeyValue _ AndToken _ high:KeyValue {
-        k := astutil.CastTo[keyconditionast.Identifier](key)
-        lo := astutil.CastTo[keyconditionast.Value](low)
-        hi := astutil.CastTo[keyconditionast.Value](high)
-        return keyconditionast.NewBetweenCondition(k, lo, hi), nil
+        k := astutil.CastTo[ast.Identifier](key)
+        lo := astutil.CastTo[ast.Value](low)
+        hi := astutil.CastTo[ast.Value](high)
+        return ast.NewBetweenCondition(k, lo, hi), nil
     }
 
 EqualsComparator

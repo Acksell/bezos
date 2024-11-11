@@ -1,4 +1,4 @@
-package conditionast
+package ast
 
 // TODO: Implement the Visitor pattern?
 

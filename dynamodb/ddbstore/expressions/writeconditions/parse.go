@@ -1,7 +1,7 @@
-package conditionparser
+package writeconditions
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/conditionast"
+	"bezos/dynamodb/ddbstore/expressions/writeconditions/ast"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -13,7 +13,7 @@ type ConditionInput struct {
 	ExpressionValues map[string]types.AttributeValue
 }
 
-func ParseCondition(condition string) (cond conditionast.Condition, err error) {
+func ParseCondition(condition string) (cond ast.Condition, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			// error message is stored in the panic value, because AST uses panics atm
@@ -26,7 +26,7 @@ func ParseCondition(condition string) (cond conditionast.Condition, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cond, ok := parsed.(conditionast.Condition)
+	cond, ok := parsed.(ast.Condition)
 	if !ok {
 		return nil, fmt.Errorf("expected ast.Condition, got %T", parsed)
 	}
@@ -45,7 +45,7 @@ func EvalCondition(c ConditionInput, doc map[string]types.AttributeValue) (match
 	if err != nil {
 		return false, err
 	}
-	v := cond.Eval(conditionast.Input{
+	v := cond.Eval(ast.Input{
 		ExpressionNames:  c.ExpressionNames,
 		ExpressionValues: convertToASTVals(c.ExpressionValues),
 	}, convertToASTVals(doc))
@@ -53,69 +53,69 @@ func EvalCondition(c ConditionInput, doc map[string]types.AttributeValue) (match
 }
 
 // AST package uses internal types in order to decouple it from AWS DDB SDK versions.
-func convertToASTVals(vals map[string]types.AttributeValue) map[string]conditionast.AttributeValue {
-	astMap := make(map[string]conditionast.AttributeValue)
+func convertToASTVals(vals map[string]types.AttributeValue) map[string]ast.AttributeValue {
+	astMap := make(map[string]ast.AttributeValue)
 	for k, v := range vals {
 		astMap[k] = convertToASTVal(v)
 	}
 	return astMap
 }
 
-func convertToASTVal(val types.AttributeValue) conditionast.AttributeValue {
+func convertToASTVal(val types.AttributeValue) ast.AttributeValue {
 	switch v := val.(type) {
 	case *types.AttributeValueMemberM:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: convertToASTVals(v.Value),
-			Type:  conditionast.MAP,
+			Type:  ast.MAP,
 		}
 	case *types.AttributeValueMemberL:
-		values := make([]conditionast.AttributeValue, 0, len(v.Value))
+		values := make([]ast.AttributeValue, 0, len(v.Value))
 		for _, val := range v.Value {
 			values = append(values, convertToASTVal(val))
 		}
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: values,
-			Type:  conditionast.LIST,
+			Type:  ast.LIST,
 		}
 	case *types.AttributeValueMemberS:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.STRING,
+			Type:  ast.STRING,
 		}
 	case *types.AttributeValueMemberN:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.NUMBER,
+			Type:  ast.NUMBER,
 		}
 	case *types.AttributeValueMemberB:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.BINARY,
+			Type:  ast.BINARY,
 		}
 	case *types.AttributeValueMemberBOOL:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.BOOL,
+			Type:  ast.BOOL,
 		}
 	case *types.AttributeValueMemberNULL:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: nil,
-			Type:  conditionast.NULL,
+			Type:  ast.NULL,
 		}
 	case *types.AttributeValueMemberSS:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.STRING_SET,
+			Type:  ast.STRING_SET,
 		}
 	case *types.AttributeValueMemberNS:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.NUMBER_SET,
+			Type:  ast.NUMBER_SET,
 		}
 	case *types.AttributeValueMemberBS:
-		return conditionast.AttributeValue{
+		return ast.AttributeValue{
 			Value: v.Value,
-			Type:  conditionast.BINARY_SET,
+			Type:  ast.BINARY_SET,
 		}
 	default:
 		panic(fmt.Sprintf("unsupported attribute type %T", v))

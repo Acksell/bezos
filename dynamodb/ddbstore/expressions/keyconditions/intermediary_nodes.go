@@ -1,7 +1,7 @@
-package keyconditionparser
+package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/keyconditionast"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
 	"bezos/dynamodb/table"
 	"fmt"
 )
@@ -15,7 +15,7 @@ type ambiguousKeyCondition struct {
 	Right *rawEqualCondition
 }
 
-func (c *ambiguousKeyCondition) Disambiguate(params *keyConditionParserParams) (*keyconditionast.KeyCondition, error) {
+func (c *ambiguousKeyCondition) Disambiguate(params *keyConditionParserParams) (*ast.KeyCondition, error) {
 	pk := params.TableKeys.PartitionKey.Name
 	sk := params.TableKeys.SortKey.Name
 	leftname := c.Left.Identifier.GetName()
@@ -39,24 +39,24 @@ func (c *ambiguousKeyCondition) Disambiguate(params *keyConditionParserParams) (
 	if err != nil {
 		return nil, fmt.Errorf("to sk cond: %w", err)
 	}
-	return keyconditionast.New(pkCond, skCond), nil
+	return ast.New(pkCond, skCond), nil
 }
 
 type rawEqualCondition struct {
-	Identifier  keyconditionast.Identifier
-	EqualsValue keyconditionast.Value
+	Identifier  ast.Identifier
+	EqualsValue ast.Value
 }
 
-func (r *rawEqualCondition) toPKCond(table table.PrimaryKeyDefinition) (keyconditionast.PartitionKeyCondition, error) {
+func (r *rawEqualCondition) toPKCond(table table.PrimaryKeyDefinition) (ast.PartitionKeyCondition, error) {
 	if err := verifyPK(r.Identifier.GetName(), table); err != nil {
-		return keyconditionast.PartitionKeyCondition{}, fmt.Errorf("verify pk: %w", err)
+		return ast.PartitionKeyCondition{}, fmt.Errorf("verify pk: %w", err)
 	}
-	return keyconditionast.NewPartitionKeyCondition(r.Identifier, r.EqualsValue), nil
+	return ast.NewPartitionKeyCondition(r.Identifier, r.EqualsValue), nil
 }
 
-func (r *rawEqualCondition) toSKCond(table table.PrimaryKeyDefinition) (*keyconditionast.SortKeyCondition, error) {
+func (r *rawEqualCondition) toSKCond(table table.PrimaryKeyDefinition) (*ast.SortKeyCondition, error) {
 	if err := verifySK(r.Identifier.GetName(), table); err != nil {
 		return nil, fmt.Errorf("verify sk: %w", err)
 	}
-	return keyconditionast.NewComparisonCondition(r.Identifier, keyconditionast.Equal, r.EqualsValue), nil
+	return ast.NewComparisonCondition(r.Identifier, ast.Equal, r.EqualsValue), nil
 }

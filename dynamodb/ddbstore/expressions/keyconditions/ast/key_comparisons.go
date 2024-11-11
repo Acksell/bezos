@@ -1,4 +1,4 @@
-package keyconditionast
+package ast
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/astutil"

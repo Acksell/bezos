@@ -1,5 +1,5 @@
 {
-  package conditionparser
+  package writeconditions
 
   import (
     "strings"

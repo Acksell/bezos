@@ -1,7 +1,7 @@
-package keyconditionparser
+package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/keyconditionast"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
 	"bezos/dynamodb/table"
 	"fmt"
 	"testing"
@@ -26,7 +26,7 @@ func TestKeyCondition(t *testing.T) {
 		keyNames   table.PrimaryKeyDefinition
 		wantPK     any
 		isvalid    bool
-		wantSKCond *keyconditionast.SortKeyCondition
+		wantSKCond *ast.SortKeyCondition
 	}{
 		{
 			name:     "correct pk",
@@ -72,11 +72,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Compare: &keyconditionast.KeyComparison{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Comp:    keyconditionast.Equal,
-					Value:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "def", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Compare: &ast.KeyComparison{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Comp:    ast.Equal,
+					Value:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "def", Type: ast.STRING}),
 				},
 			},
 		},
@@ -100,10 +100,10 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				BeginsWith: &keyconditionast.KeyBeginsWith{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Prefix:  keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "def", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				BeginsWith: &ast.KeyBeginsWith{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Prefix:  ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "def", Type: ast.STRING}),
 				},
 			},
 		},
@@ -134,11 +134,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Between: &keyconditionast.KeyBetween{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Lower:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "123", Type: keyconditionast.STRING}),
-					Upper:   keyconditionast.NewExpressionAttributeValue(":2", keyconditionast.KeyValue{Value: "456", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Between: &ast.KeyBetween{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Lower:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "123", Type: ast.STRING}),
+					Upper:   ast.NewExpressionAttributeValue(":2", ast.KeyValue{Value: "456", Type: ast.STRING}),
 				},
 			},
 		},
@@ -155,11 +155,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Compare: &keyconditionast.KeyComparison{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Comp:    keyconditionast.GreaterThan,
-					Value:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "123", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Compare: &ast.KeyComparison{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Comp:    ast.GreaterThan,
+					Value:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "123", Type: ast.STRING}),
 				},
 			},
 		},
@@ -169,11 +169,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Compare: &keyconditionast.KeyComparison{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Comp:    keyconditionast.GreaterOrEqual,
-					Value:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "123", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Compare: &ast.KeyComparison{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Comp:    ast.GreaterOrEqual,
+					Value:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "123", Type: ast.STRING}),
 				},
 			},
 		},
@@ -183,11 +183,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Compare: &keyconditionast.KeyComparison{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Comp:    keyconditionast.LessOrEqual,
-					Value:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "123", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Compare: &ast.KeyComparison{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Comp:    ast.LessOrEqual,
+					Value:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "123", Type: ast.STRING}),
 				},
 			},
 		},
@@ -197,11 +197,11 @@ func TestKeyCondition(t *testing.T) {
 			keyNames: singleTableKeys,
 			wantPK:   "abc",
 			isvalid:  true,
-			wantSKCond: &keyconditionast.SortKeyCondition{
-				Compare: &keyconditionast.KeyComparison{
-					KeyName: keyconditionast.NewExpressionAttributeName("#1", "sk"),
-					Comp:    keyconditionast.LessThan,
-					Value:   keyconditionast.NewExpressionAttributeValue(":1", keyconditionast.KeyValue{Value: "123", Type: keyconditionast.STRING}),
+			wantSKCond: &ast.SortKeyCondition{
+				Compare: &ast.KeyComparison{
+					KeyName: ast.NewExpressionAttributeName("#1", "sk"),
+					Comp:    ast.LessThan,
+					Value:   ast.NewExpressionAttributeValue(":1", ast.KeyValue{Value: "123", Type: ast.STRING}),
 				},
 			},
 		},

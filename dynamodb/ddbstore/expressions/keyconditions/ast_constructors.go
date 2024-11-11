@@ -1,24 +1,24 @@
-package keyconditionparser
+package keyconditions
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/astutil"
-	"bezos/dynamodb/ddbstore/expressions/keyconditionast"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
 	"bezos/dynamodb/table"
 	"fmt"
 )
 
 //todo add some more of these, instead of defining them inline in the peg file, so that we can test them.
 
-func fromPKSK(part, sort any, table table.PrimaryKeyDefinition) (*keyconditionast.KeyCondition, error) {
-	pk := astutil.CastTo[keyconditionast.PartitionKeyCondition](part)
+func fromPKSK(part, sort any, table table.PrimaryKeyDefinition) (*ast.KeyCondition, error) {
+	pk := astutil.CastTo[ast.PartitionKeyCondition](part)
 	if err := verifyPK(pk.KeyName.GetName(), table); err != nil {
 		return nil, err
 	}
 	if sort == nil {
-		return keyconditionast.New(pk, nil), nil
+		return ast.New(pk, nil), nil
 	}
-	sk := astutil.CastTo[*keyconditionast.SortKeyCondition](sort)
-	return keyconditionast.New(pk, sk), verifySK(sk.KeyName(), table)
+	sk := astutil.CastTo[*ast.SortKeyCondition](sort)
+	return ast.New(pk, sk), verifySK(sk.KeyName(), table)
 }
 
 func verifyIdentifierAgainstTable(name string, table table.PrimaryKeyDefinition) error {

@@ -8,7 +8,7 @@ casting the interfaces to the appropriate types.
 
 The parser is responsible for constructing the AST.
 */
-package keyconditionast
+package ast
 
 import (
 	"fmt"

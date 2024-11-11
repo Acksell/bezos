@@ -1,7 +1,7 @@
-package keyconditionparser
+package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/keyconditionast"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
 	"bezos/dynamodb/table"
 	"fmt"
 
@@ -18,7 +18,7 @@ type KeyConditionParams struct {
 // Internal API for the parser
 type keyConditionParserParams struct {
 	ExpressionKeyNames  map[string]string
-	ExpressionKeyValues map[string]keyconditionast.KeyValue
+	ExpressionKeyValues map[string]ast.KeyValue
 	TableKeys           table.PrimaryKeyDefinition // can use internal type instead
 }
 
@@ -26,16 +26,16 @@ const (
 	globalStoreParamsKey = "keyCondParams"
 )
 
-func ParseKeyCondition(expr string, keyParams KeyConditionParams) (*keyconditionast.KeyCondition, error) {
+func ParseKeyCondition(expr string, keyParams KeyConditionParams) (*ast.KeyCondition, error) {
 	parserParams := toParserParams(keyParams)
 	// todo put in internal package?
 	v, err := Parse("keyConditionParser", []byte(expr), GlobalStore(globalStoreParamsKey, parserParams))
 	if err != nil {
 		return nil, err
 	}
-	ast, ok := v.(*keyconditionast.KeyCondition)
+	ast, ok := v.(*ast.KeyCondition)
 	if !ok {
-		return nil, fmt.Errorf("expected *keyconditionast.KeyCondition, got %T", v)
+		return nil, fmt.Errorf("expected *ast.KeyCondition, got %T", v)
 	}
 	return ast, nil
 }
@@ -48,22 +48,22 @@ func toParserParams(params KeyConditionParams) *keyConditionParserParams {
 	}
 }
 
-func toKeyValues(attrs map[string]types.AttributeValue) map[string]keyconditionast.KeyValue {
-	res := make(map[string]keyconditionast.KeyValue)
+func toKeyValues(attrs map[string]types.AttributeValue) map[string]ast.KeyValue {
+	res := make(map[string]ast.KeyValue)
 	for k, v := range attrs {
 		res[k] = toKeyValue(v)
 	}
 	return res
 }
 
-func toKeyValue(attr types.AttributeValue) keyconditionast.KeyValue {
+func toKeyValue(attr types.AttributeValue) ast.KeyValue {
 	switch v := attr.(type) {
 	case *types.AttributeValueMemberS:
-		return keyconditionast.KeyValue{Value: v.Value, Type: keyconditionast.STRING}
+		return ast.KeyValue{Value: v.Value, Type: ast.STRING}
 	case *types.AttributeValueMemberN:
-		return keyconditionast.KeyValue{Value: v.Value, Type: keyconditionast.NUMBER}
+		return ast.KeyValue{Value: v.Value, Type: ast.NUMBER}
 	case *types.AttributeValueMemberB:
-		return keyconditionast.KeyValue{Value: v.Value, Type: keyconditionast.BINARY}
+		return ast.KeyValue{Value: v.Value, Type: ast.BINARY}
 	default:
 		panic(fmt.Errorf("unsupported attribute value type %T", attr))
 	}

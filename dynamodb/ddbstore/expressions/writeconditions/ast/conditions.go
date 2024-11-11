@@ -2,7 +2,7 @@
 conditionast package contains the AST for condition expressions in DynamoDB writes/updates.
 It is not used for queries. For queries, use keyconditionast, filterexpressionast & projectionexpressionast.
 */
-package conditionast
+package ast
 
 import (
 	"bezos/dynamodb/ddbstore/expressions/astutil"

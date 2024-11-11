@@ -1,4 +1,4 @@
-package conditionparser
+package writeconditions
 
 import (
 	"fmt"
