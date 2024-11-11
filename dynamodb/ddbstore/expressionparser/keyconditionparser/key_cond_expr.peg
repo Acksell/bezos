@@ -1,0 +1,178 @@
+{
+    package keyconditionparser
+
+    import (
+        "fmt"
+        "strings"
+
+        "bezos/dynamodb/ddbstore/expressionparser/keyconditionast"
+        "bezos/dynamodb/ddbstore/expressionparser/astutil"
+    )
+
+    func (c *current) paramsFromStore() *keyConditionParserParams {
+        v, found := c.globalStore[globalStoreParamsKey]
+        if !found {
+            panic("no key condition parameters found in parser")
+        }
+        params, ok := v.(*keyConditionParserParams)
+        if !ok {
+            panic(fmt.Sprintf("got params type %T, want %T", v, params))
+        }
+        return params
+    }
+
+    func (c *current) resolveAmbiguousKeyCondition(left, right any) (*keyconditionast.KeyCondition, error) {
+        // Need to disambiguate between PK and SK if they are both using
+        // the "=" operation.
+        // Use global store to fetch table key information
+        l := astutil.CastTo[*rawEqualCondition](left)
+        r := astutil.CastTo[*rawEqualCondition](right)
+        intermediary := &ambiguousKeyCondition{l, r}
+        return intermediary.Disambiguate(c.paramsFromStore())
+    }
+}
+
+// TODO use errors instead of panics.
+// TODO remove all unnecessary !ReservedWord negative lookaheads
+
+Start
+  = _ expr:KeyConditionExpression _ {  
+        return expr, nil
+    }
+
+KeyConditionExpression
+  = pk:PKCondition _ AndToken _ sk:SKRangeCondition {
+        return fromPKSK(pk, sk, c.paramsFromStore().TableKeys)
+    }
+  / sk:SKRangeCondition _ AndToken _ pk:PKCondition {
+        return fromPKSK(pk, sk, c.paramsFromStore().TableKeys)
+    }
+  / left:EqualsCondition _ AndToken _ right:EqualsCondition {      
+        return c.resolveAmbiguousKeyCondition(left, right)
+    }
+  / pk:PKCondition {//! important that this is last, order matters in PEG
+        return fromPKSK(pk, nil, c.paramsFromStore().TableKeys)
+    }
+
+PKCondition
+  = eq:EqualsCondition {
+        equal := astutil.CastTo[*rawEqualCondition](eq)
+        return equal.toPKCond(c.paramsFromStore().TableKeys)
+    }
+
+EqualsCondition
+  = '(' _ '(' _ expr:EqualsConditionNoParens _ ')' _ ')' {
+        // can handle gracefully but DDB doesn't so we fail here with same err msg
+        return expr, fmt.Errorf("The expression has redundant parentheses;")
+    }
+  / '(' _ expr:EqualsConditionNoParens _ ')' {
+        return expr, nil
+    }
+  / EqualsConditionNoParens
+
+EqualsConditionNoParens
+  = name:Identifier _ EqualsComparator _ equals:KeyValue {
+        n := astutil.CastTo[keyconditionast.Identifier](name)
+        eq := astutil.CastTo[keyconditionast.Value](equals)
+        return &rawEqualCondition{n, eq}, nil
+    }
+
+Identifier
+  = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
+        name := astutil.HeadTailString(head, tail)
+        return keyconditionast.RawName{name}, verifyIdentifierAgainstTable(name, c.paramsFromStore().TableKeys)
+    }
+  / ExpressionAttributeName
+
+IdentifierStart
+  = [a-zA-Z]
+  / "_"
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+ExpressionAttributeName
+  = !ReservedWord head:"#" tail:IdentifierPart* {
+        alias := string(c.text)
+        resolved, found := c.paramsFromStore().ExpressionKeyNames[alias]
+        if !found {
+            return nil, fmt.Errorf("unresolved expression attribute name %q", alias)
+        }
+        return keyconditionast.NewExpressionAttributeName(string(c.text), resolved), verifyIdentifierAgainstTable(resolved, c.paramsFromStore().TableKeys)
+    }
+
+KeyValue
+  = ExpressionAttributeValue
+
+ExpressionAttributeValue
+  = !ReservedWord head:":" tail:IdentifierPart* {
+        alias := string(c.text)
+        resolved, found := c.paramsFromStore().ExpressionKeyValues[alias]
+        if !found {
+            return nil, fmt.Errorf("unresolved expression attribute value %q", alias)
+        }
+        return keyconditionast.NewExpressionAttributeValue(string(c.text), resolved), nil
+    }
+
+SKRangeCondition
+  = '(' _ '(' _ expr:SKRangeConditionNoParens _ ')' _ ')' {
+        // can handle gracefully but DDB doesn't so we fail here with same err msg
+        return expr, fmt.Errorf("The expression has redundant parentheses;")
+    }
+  / '(' _ expr:SKRangeConditionNoParens _ ')' {
+        return expr, nil
+    }
+  / SKRangeConditionNoParens
+
+SKRangeConditionNoParens
+  = RangeComparison
+  / BeginsWithFunction
+  / BetweenOperation
+
+
+RangeComparison
+  = key:Identifier _ comp:RangeComparator _ val:KeyValue {
+        k := astutil.CastTo[keyconditionast.Identifier](key)
+        cmp := keyconditionast.KeyComparator(string(comp.([]byte)))
+        v := astutil.CastTo[keyconditionast.Value](val)
+        return keyconditionast.NewComparisonCondition(k, cmp, v), nil
+    }
+
+BeginsWithFunction
+  = _ BeginsWithToken _ '(' _ key:Identifier _ ',' _ prefix:KeyValue ')' { 
+        // unclear whether `prefix` needs to be an expression attribute value or can be a constant string
+        k := astutil.CastTo[keyconditionast.Identifier](key)
+        pfx := astutil.CastTo[keyconditionast.Value](prefix)
+        return keyconditionast.NewBeginsWithCondition(k, pfx), nil
+    }
+
+BetweenOperation
+  = !ReservedWord _ key:Identifier _ BetweenToken _ low:KeyValue _ AndToken _ high:KeyValue {
+        k := astutil.CastTo[keyconditionast.Identifier](key)
+        lo := astutil.CastTo[keyconditionast.Value](low)
+        hi := astutil.CastTo[keyconditionast.Value](high)
+        return keyconditionast.NewBetweenCondition(k, lo, hi), nil
+    }
+
+EqualsComparator
+  = "="
+
+RangeComparator
+  = ">="
+  / "<="
+  / "<"
+  / ">"
+
+// todo rename to "OperatorWord", figure out why we really need !ReservedWord, for performance or for correctness?
+ReservedWord
+  = BetweenToken
+  / AndToken
+  / BeginsWithToken
+
+BetweenToken = "BETWEEN"i !IdentifierPart
+AndToken = "AND"i !IdentifierPart
+BeginsWithToken ="BEGINS_WITH"i !IdentifierPart
+
+_ "whitespace"
+  = [ \t\r\n]*
