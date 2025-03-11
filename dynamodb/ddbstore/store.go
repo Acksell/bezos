@@ -5,16 +5,25 @@ import (
 	"bezos/dynamodb/table"
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	badger "github.com/dgraph-io/badger/v4"
 
 	"github.com/google/btree"
 )
 
 var errNotFound = fmt.Errorf("not found")
 
-func NewStore(defs ...table.TableDefinition) *mockStore {
+func NewStore(defs ...table.TableDefinition) (*mockStore, func() error) {
+	// Open the Badger database located in the /tmp/badger directory.
+	// It will be created if it doesn't exist.
+	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	tables := make(map[string]*mockTable)
 	for _, t := range defs {
 		gsis := make(map[string]*mockTable)
@@ -31,12 +40,14 @@ func NewStore(defs ...table.TableDefinition) *mockStore {
 			store:      make(map[partitionKey]*btree.BTreeG[*document]),
 		}
 	}
+
 	return &mockStore{
 		tables: tables,
-	}
+	}, db.Close
 }
 
 type mockStore struct {
+	db     *badger.DB
 	tables map[string]*mockTable
 }
 
@@ -81,7 +92,7 @@ func less(l *document, r *document) bool {
 }
 
 func (t *mockTable) extractPrimaryKey(item map[string]types.AttributeValue) (table.PrimaryKey, error) {
-	pk, err := t.definition.ExtractPrimaryKey(item) // todo maybe this function should be in this package instead
+	pk, err := t.definition.KeyDefinitions.ExtractPrimaryKey(item)
 	if err != nil {
 		return table.PrimaryKey{}, err
 	}
@@ -222,6 +233,17 @@ func (s *mockStore) GetItem(ctx context.Context, params *dynamodb.GetItemInput, 
 	if err != nil {
 		return nil, err
 	}
+	s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("key"))
+		if err != nil {
+			return err
+		}
+		// txn.NewKeyIterator()
+		return item.Value(func(val []byte) error {
+			// This func with val is the callback to handle the value.
+			return nil
+		})
+	})
 	return table.GetItem(ctx, params, optFns...)
 }
 
@@ -376,6 +398,7 @@ func (s *mockStore) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns
 }
 
 func (s *mockStore) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+	// todo what about setting a nested field where the root doesn't exist? verify expected behavior and add tests
 	return nil, nil
 }
 
