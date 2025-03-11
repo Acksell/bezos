@@ -5,30 +5,33 @@ import (
 	"time"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type Action interface {
 	TableName() *string
-	PrimaryKey() table.PrimaryKey
+	PrimaryKey() (table.PrimaryKey, error)
 }
 
 type Put struct {
-	Table table.TableDefinition
-	// Index  Index
+	Index  table.PrimaryIndexDefinition
 	Entity DynamoEntity
-	Key    table.PrimaryKey
 
 	ttlExpiry *time.Time
 
 	c expression2.ConditionBuilder
+
+	doc map[string]types.AttributeValue
 }
 
 // UnsafeUpdate is called unsafe because it does not require the user to
 // check the invariants of the entity they're modifying. The safety of the
 // operation relies solely on the user doing careful validations before committing.
+// Furthermore there may be unintended race conditions from concurrent modifications
+// unless using optimistic locking (by using WithCondition).
 type UnsafeUpdate struct {
 	Table  table.TableDefinition
-	Key    table.PrimaryKey
+	Key    table.PrimaryKey // todo how does the user construct this key using indices?
 	Fields map[string]UpdateOp
 
 	ttlExpiry          *time.Time

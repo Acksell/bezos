@@ -11,21 +11,35 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// todo make private and only allow people to interact via indices?
-func NewPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
+func newPut(index table.PrimaryIndexDefinition, e DynamoEntity) *Put {
 	return &Put{
-		Table:  table,
-		Key:    key,
+		Index:  index,
 		Entity: e,
 	}
 }
 
 func (p *Put) TableName() *string {
-	return &p.Table.Name
+	return &p.Index.Table.Name
 }
 
-func (p *Put) PrimaryKey() table.PrimaryKey {
-	return p.Key
+func (p *Put) toDoc() (map[string]types.AttributeValue, error) {
+	if p.doc != nil {
+		return p.doc, nil
+	}
+	doc, err := attributevalue.MarshalMap(p.Entity)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
+	}
+	p.doc = doc
+	return doc, nil
+}
+
+func (p *Put) PrimaryKey() (table.PrimaryKey, error) {
+	doc, err := p.toDoc()
+	if err != nil {
+		return table.PrimaryKey{}, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
+	}
+	return p.Index.PrimaryKey(doc)
 }
 
 func (p *Put) WithTTL(expiry time.Time) *Put {
@@ -34,19 +48,49 @@ func (p *Put) WithTTL(expiry time.Time) *Put {
 }
 
 func (p *Put) WithCondition(c expression2.ConditionBuilder) *Put {
-	p.c = p.c.And(c)
+	if p.c.IsSet() {
+		p.c = p.c.And(c)
+		return p
+	}
+	p.c = c
 	return p
 }
 
 func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, error) {
-	entity, err := attributevalue.MarshalMap(p.Entity)
+	if err := p.Entity.IsValid(); err != nil {
+		return expression2.Expression{}, nil, fmt.Errorf("entity %q is not valid: %w", p.Entity.GetID(), err)
+	}
+	doc, err := p.toDoc()
 	if err != nil {
-		return expression2.Expression{}, nil, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
+		return expression2.Expression{}, nil, fmt.Errorf("convert entity to ddb doc: %w", err)
 	}
 	b := expression2.NewBuilder()
 	b.WithCondition(p.c)
 	if p.ttlExpiry != nil {
-		entity[p.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
+		doc[p.Index.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
+	}
+	pk, err := p.Index.PrimaryKey(doc)
+	if err != nil {
+		return expression2.Expression{}, nil, fmt.Errorf("failed to get primary key: %w", err)
+	}
+	key := pk.DDB()
+	for k, v := range key {
+		if _, ok := doc[k]; ok {
+			return expression2.Expression{}, nil, fmt.Errorf("key attribute %q is already in the entity document", k)
+		}
+		doc[k] = v
+	}
+	for _, secondIdx := range p.Index.Table.Projections {
+		secondPk, err := secondIdx.PrimaryKey(doc)
+		if err != nil {
+			return expression2.Expression{}, nil, fmt.Errorf("failed to get secondary index primary key: %w", err)
+		}
+		for k, v := range secondPk.DDB() {
+			if _, ok := doc[k]; ok {
+				return expression2.Expression{}, nil, fmt.Errorf("key attribute %q is already in the entity document", k)
+			}
+			doc[k] = v
+		}
 	}
 	// for _, k := range p.Table.GSIKeys() {
 	// 	entity[k.Names.PartitionKeyName] = &types.AttributeValueMemberS{Value: k.Values.PartitionKey}
@@ -56,7 +100,7 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	if err != nil {
 		return expression2.Expression{}, nil, fmt.Errorf("build: %w", err)
 	}
-	return exp, entity, nil
+	return exp, doc, nil
 }
 
 func (p *Put) ToPutItem() (*dynamodbv2.PutItemInput, error) {

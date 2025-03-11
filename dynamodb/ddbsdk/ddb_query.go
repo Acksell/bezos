@@ -142,62 +142,32 @@ func (q *querier) WithEventuallyConsistentReads() *querier {
 	return q
 }
 
-func (q *querier) WithDescending() *querier {
-	q.opts.descending = true
-	return q
+func WithDescending() QueryOption {
+	return func(q *queryOptions) {
+		q.descending = true
+	}
 }
 
-func (q *querier) WithPageSize(limit int) *querier {
-	q.opts.pageSize = int32(limit)
-	return q
+func WithPageSize(limit int) QueryOption {
+	return func(q *queryOptions) {
+		q.pageSize = int32(limit)
+	}
 }
 
-func (q *querier) WithGSI(indexName string) *querier {
-	q.opts.indexName = &indexName
-	return q
+func WithGSI(indexName string) QueryOption {
+	return func(q *queryOptions) {
+		q.indexName = &indexName
+	}
 }
 
 // Filter based on entity type.
 //
 // todo queries on indices should pass entity filters by default to its query constructor
 // todo add more filters
-func (q *querier) WithEntityFilter(typ string) *querier {
-	q.opts.filter = q.opts.filter.And(expression2.Equal(expression2.Name("meta.type"), expression2.Value(typ)))
-	return q
-}
-
-var Table = table.TableDefinition{
-	Name: "test-table",
-	KeyDefinitions: table.PrimaryKeyDefinition{
-		PartitionKey: table.KeyDef{"pk", table.KeyKindS},
-		SortKey:      table.KeyDef{"sk", table.KeyKindS},
-	},
-	TimeToLiveKey: "ttl",
-	GSIs: []table.TableDefinition{
-		{
-			Name: "byName",
-			KeyDefinitions: table.PrimaryKeyDefinition{
-				PartitionKey: table.KeyDef{"pk", table.KeyKindS},
-				SortKey:      table.KeyDef{"name", table.KeyKindS},
-			},
-		},
-	},
-}
-
-func _() {
-	var ddb *dynamodbv2.Client
-
-	q := NewQuerier(ddb, Table, NewKeyCondition("state#123", BeginsWith("lol"))).
-		WithDescending().
-		WithPageSize(10).
-		WithEntityFilter("ExampleEntity")
-
-	ctx := context.Background()
-	res, err := q.Next(ctx)
-	if err != nil {
-		panic(err)
+func WithEntityFilter(typ string) QueryOption {
+	return func(q *queryOptions) {
+		q.filter = q.filter.And(expression2.Equal(expression2.Name("meta.type"), expression2.Value(typ)))
 	}
-	fmt.Println(len(res.Entities))
 }
 
 type SortKeyStrategy func(skName string) expression2.KeyConditionBuilder

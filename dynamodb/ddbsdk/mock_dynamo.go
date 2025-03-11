@@ -5,11 +5,11 @@ import (
 	"bezos/dynamodb/table"
 )
 
-func NewMock(defs ...table.TableDefinition) IO {
-	mock := ddbstore.NewStore(defs...)
+func NewMock(defs ...table.TableDefinition) (IO, func() error) {
+	mock, closer := ddbstore.NewStore(defs...)
 	// works if mockddb.NewStore() is a good enough mock of AWSDynamoClientV2 iface
 	// todo implement projection expressions
-	return New(mock)
+	return New(mock), closer
 }
 
 // todo can remove if mockddb.NewStore() supports all required DDB features.

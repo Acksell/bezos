@@ -9,7 +9,7 @@ import (
 
 type PrimaryKeyDefinition struct {
 	PartitionKey KeyDef
-	SortKey      KeyDef // pointer to indicate optionality? or just focus on single table design where it's not optional?
+	SortKey      KeyDef
 }
 
 type KeyDef struct {
@@ -25,7 +25,7 @@ const (
 	KeyKindB KeyKind = "B"
 )
 
-// Type safety is ensured by using type constrained constructors generated based on the Table's KeyDefinition.
+// Type safety can be ensured by using type constrained constructors generated based on the Table's KeyDefinition.
 type PrimaryKeyValues struct {
 	PartitionKey any
 	SortKey      any
@@ -36,7 +36,7 @@ type PrimaryKey struct {
 	Values     PrimaryKeyValues
 }
 
-// TODO test
+// TODO return error instead
 func (k PrimaryKey) DDB() map[string]types.AttributeValue {
 	pk, err := attributevalue.Marshal(k.Values.PartitionKey)
 	if err != nil {
@@ -78,4 +78,45 @@ func attributeMatchesDefinition(want KeyKind, v types.AttributeValue) error {
 		return fmt.Errorf("got KeyKind %q want %q", got, want)
 	}
 	return nil
+}
+
+func (def PrimaryKeyDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
+	part, ok := doc[def.PartitionKey.Name]
+	if !ok {
+		return PrimaryKey{}, fmt.Errorf("partition key not found")
+	}
+	if err := attributeMatchesDefinition(def.PartitionKey.Kind, part); err != nil {
+		return PrimaryKey{}, fmt.Errorf("partition key kind does not match definition")
+	}
+	pk := PrimaryKey{
+		Definition: def,
+		Values: PrimaryKeyValues{
+			PartitionKey: keyValueFromAV(part),
+		},
+	}
+	if def.SortKey.Name == "" {
+		return pk, nil
+	}
+	sort, ok := doc[def.SortKey.Name]
+	if !ok {
+		return PrimaryKey{}, fmt.Errorf("sort key not found")
+	}
+	if err := attributeMatchesDefinition(def.SortKey.Kind, sort); err != nil {
+		return PrimaryKey{}, fmt.Errorf("sort key kind does not match definition")
+	}
+	pk.Values.SortKey = keyValueFromAV(sort)
+	return pk, nil
+}
+
+func keyValueFromAV(av types.AttributeValue) any {
+	switch v := av.(type) {
+	case *types.AttributeValueMemberS:
+		return v.Value
+	case *types.AttributeValueMemberN:
+		return v.Value
+	case *types.AttributeValueMemberB:
+		return v.Value
+	default:
+		panic(fmt.Sprintf("unsupported attribute value %T for dynamodb keys", v))
+	}
 }
