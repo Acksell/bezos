@@ -21,8 +21,8 @@ func (u *UnsafeUpdate) TableName() *string {
 	return &u.Table.Name
 }
 
-func (u *UnsafeUpdate) PrimaryKey() table.PrimaryKey {
-	return u.Key
+func (u *UnsafeUpdate) PrimaryKey() (table.PrimaryKey, error) {
+	return u.Key, nil
 }
 
 func (u *UnsafeUpdate) AddOp(op UpdateOp) *UnsafeUpdate {
@@ -42,7 +42,11 @@ func (u *UnsafeUpdate) RefreshTTL(expiry time.Time) *UnsafeUpdate {
 }
 
 func (u *UnsafeUpdate) WithCondition(c expression2.ConditionBuilder) *UnsafeUpdate {
-	u.c = u.c.And(c)
+	if u.c.IsSet() {
+		u.c = u.c.And(c)
+		return u
+	}
+	u.c = c
 	return u
 }
 
@@ -108,9 +112,13 @@ func (u *UnsafeUpdate) ToUpdateItem() (*dynamodbv2.UpdateItemInput, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to build update: %w", err)
 	}
+	pk, err := u.PrimaryKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary key: %w", err)
+	}
 	return &dynamodbv2.UpdateItemInput{
 		TableName:                 u.TableName(),
-		Key:                       u.PrimaryKey().DDB(),
+		Key:                       pk.DDB(),
 		UpdateExpression:          e.Update(),
 		ConditionExpression:       e.Condition(),
 		ExpressionAttributeValues: e.Values(),
@@ -123,10 +131,14 @@ func (u *UnsafeUpdate) ToTransactWriteItem() (types.TransactWriteItem, error) {
 	if err != nil {
 		return types.TransactWriteItem{}, fmt.Errorf("failed to build update: %w", err)
 	}
+	pk, err := u.PrimaryKey()
+	if err != nil {
+		return types.TransactWriteItem{}, fmt.Errorf("failed to get primary key: %w", err)
+	}
 	return types.TransactWriteItem{
 		Update: &types.Update{
 			TableName:                 u.TableName(),
-			Key:                       u.PrimaryKey().DDB(),
+			Key:                       pk.DDB(),
 			UpdateExpression:          e.Update(),
 			ConditionExpression:       e.Condition(),
 			ExpressionAttributeValues: e.Values(),

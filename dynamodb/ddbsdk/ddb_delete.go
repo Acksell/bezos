@@ -20,11 +20,15 @@ func (d *Delete) TableName() *string {
 	return &d.Table.Name
 }
 
-func (d *Delete) PrimaryKey() table.PrimaryKey {
-	return d.Key
+func (d *Delete) PrimaryKey() (table.PrimaryKey, error) {
+	return d.Key, nil
 }
 
 func (d *Delete) WithCondition(c expression2.ConditionBuilder) *Delete {
+	if d.c.IsSet() {
+		d.c = d.c.And(c)
+		return d
+	}
 	d.c = c
 	return d
 }
@@ -44,9 +48,13 @@ func (d *Delete) ToDeleteItem() (*dynamodbv2.DeleteItemInput, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to build delete: %w", err)
 	}
+	pk, err := d.PrimaryKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get primary key: %w", err)
+	}
 	return &dynamodbv2.DeleteItemInput{
 		TableName:                 d.TableName(),
-		Key:                       d.PrimaryKey().DDB(),
+		Key:                       pk.DDB(),
 		ConditionExpression:       e.Condition(),
 		ExpressionAttributeValues: e.Values(),
 		ExpressionAttributeNames:  e.Names(),
@@ -58,10 +66,14 @@ func (d *Delete) ToTransactWriteItem() (types.TransactWriteItem, error) {
 	if err != nil {
 		return types.TransactWriteItem{}, fmt.Errorf("failed to build delete: %w", err)
 	}
+	pk, err := d.PrimaryKey()
+	if err != nil {
+		return types.TransactWriteItem{}, fmt.Errorf("failed to get primary key: %w", err)
+	}
 	return types.TransactWriteItem{
 		Delete: &types.Delete{
 			TableName:                 d.TableName(),
-			Key:                       d.PrimaryKey().DDB(),
+			Key:                       pk.DDB(),
 			ConditionExpression:       e.Condition(),
 			ExpressionAttributeValues: e.Values(),
 			ExpressionAttributeNames:  e.Names(),

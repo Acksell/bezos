@@ -2,18 +2,27 @@ package bzoddb
 
 import (
 	"bezos/dynamodb/table"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 )
 
 // Put without optimistic locking
-func NewUnsafePut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
-	return NewPut(table, key, e)
+// It is recommended to use NewSafePut instead of NewUnsafePut.
+func NewUnsafePut(index table.PrimaryIndexDefinition, e DynamoEntity) *Put {
+	return newPut(index, e)
 }
 
-// Put with optimistic locking
-func NewSafePut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
-	return NewPut(table, key, e).WithCondition(
-		expression.Equal(expression.Name("meta.updated"), expression.Value(e.GetMeta().Updated.Format(time.RFC3339Nano))))
+type VersionedDynamoEntity interface {
+	DynamoEntity
+	// Version should return the dynamodb field name and current value of the version field
+	Version() (string, any)
+}
+
+// Put with optimistic locking.
+// Aborts the transaction if the version was changed by another transaction before committing.
+func NewSafePut(index table.PrimaryIndexDefinition, e VersionedDynamoEntity) *Put {
+	versionField, version := e.Version()
+	return newPut(index, e).WithCondition(
+		expression.Equal(expression.Name(versionField), expression.Value(version)).
+			Or(expression.AttributeNotExists(expression.Name(versionField))))
 }
