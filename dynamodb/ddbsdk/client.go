@@ -6,6 +6,7 @@ import (
 	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 type AWSDynamoClientV2 interface {
@@ -41,8 +42,8 @@ func (c *Client) NewBatch(opts ...BatchOption) Batcher {
 	return NewBatcher(c.awsddb, opts...)
 }
 
-func (c *Client) NewQuery(table table.TableDefinition, kc KeyCondition, opts ...QueryOption) Querier {
-	return NewQuerier(c.awsddb, table, kc, opts...)
+func (c *Client) NewQuery(table table.TableDefinition, kc KeyCondition) Querier {
+	return NewQuerier(c.awsddb, table, kc)
 }
 
 func (c *Client) NewGet(opts ...GetOption) Getter {
@@ -72,7 +73,7 @@ type Batcher interface {
 }
 
 type Reader interface {
-	NewQuery(table.TableDefinition, KeyCondition, ...QueryOption) Querier
+	NewQuery(table.TableDefinition, KeyCondition) Querier
 	NewGet(...GetOption) Getter
 }
 
@@ -81,8 +82,12 @@ type Querier interface {
 	QueryAll(context.Context) (*QueryResult, error)
 }
 
+// Item represents a raw DynamoDB item as returned from Get operations.
+// Callers should use attributevalue.UnmarshalMap to convert to their struct.
+type Item = map[string]types.AttributeValue
+
 type Getter interface {
-	Lookup(context.Context, ItemIdentifier) (DynamoEntity, error)
-	TxLookupMany(context.Context, ...ItemIdentifier) ([]DynamoEntity, error)
-	BatchLookupMany(context.Context, ...ItemIdentifier) ([]DynamoEntity, error)
+	GetItem(context.Context, LookupItem) (Item, error)
+	GetItemsTx(context.Context, ...LookupItem) ([]Item, error)
+	GetItemsBatch(context.Context, ...LookupItem) ([]Item, error)
 }
