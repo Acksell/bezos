@@ -1,0 +1,229 @@
+{
+  package parser
+
+  import (
+    "fmt"
+    "strings"
+
+    "bezos/dynamodb/ddbstore/updateexpressions/ast"
+    "bezos/dynamodb/ddbstore/astutil"
+  )
+
+  // sectionTracker tracks which sections have been seen to enforce uniqueness
+  type sectionTracker struct {
+    hasSet    bool
+    hasRemove bool
+    hasAdd    bool
+    hasDelete bool
+  }
+
+  func (s *sectionTracker) markSet() error {
+    if s.hasSet {
+      return fmt.Errorf("The \"SET\" section can only be used once in an update expression;")
+    }
+    s.hasSet = true
+    return nil
+  }
+
+  func (s *sectionTracker) markRemove() error {
+    if s.hasRemove {
+      return fmt.Errorf("The \"REMOVE\" section can only be used once in an update expression;")
+    }
+    s.hasRemove = true
+    return nil
+  }
+
+  func (s *sectionTracker) markAdd() error {
+    if s.hasAdd {
+      return fmt.Errorf("The \"ADD\" section can only be used once in an update expression;")
+    }
+    s.hasAdd = true
+    return nil
+  }
+
+  func (s *sectionTracker) markDelete() error {
+    if s.hasDelete {
+      return fmt.Errorf("The \"DELETE\" section can only be used once in an update expression;")
+    }
+    s.hasDelete = true
+    return nil
+  }
+}
+
+// UpdateExpression grammar for DynamoDB
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.UpdateExpressions.html
+
+Start
+  = _ expr:UpdateExpression _ !. {
+      return expr, nil
+    }
+
+UpdateExpression
+  = clauses:Clause+ {
+      return ast.NewUpdateExpression(clauses), nil
+    }
+
+Clause
+  = SetClause
+  / RemoveClause
+  / AddClause
+  / DeleteClause
+
+// SET clause: SET path = value [, path = value ...]
+SetClause
+  = _ SetToken _ head:SetAction tail:(_ ',' _ action:SetAction { return action, nil })* {
+      tracker := c.globalStore["sectionTracker"].(*sectionTracker)
+      if err := tracker.markSet(); err != nil {
+        return nil, err
+      }
+      actions := astutil.HeadTailSlice[ast.SetAction](head, tail)
+      return ast.NewSetClause(actions), nil
+    }
+
+SetAction
+  = path:PathExpression _ '=' _ value:SetValue {
+      return ast.NewSetAction(path, value), nil
+    }
+
+SetValue
+  = '(' _ '(' _ value:SetValue _ ')' _ ')' {
+      return nil, fmt.Errorf("The expression has redundant parentheses;")
+    }
+  / '(' _ value:SetValue _ ')' {
+      return value, nil
+    }
+  / left:Operand _ op:[+-] _ right:Operand {
+      return ast.NewArithmeticOp(left, string(op.([]byte)), right), nil
+    }
+  / Operand
+
+// REMOVE clause: REMOVE path [, path ...]
+RemoveClause
+  = _ RemoveToken _ head:RemoveAction tail:(_ ',' _ path:RemoveAction { return path, nil })* {
+      tracker := c.globalStore["sectionTracker"].(*sectionTracker)
+      if err := tracker.markRemove(); err != nil {
+        return nil, err
+      }
+      paths := astutil.HeadTailSlice[ast.RemovePath](head, tail)
+      return ast.NewRemoveClause(paths), nil
+    }
+
+RemoveAction
+  = path:PathExpression {
+      return ast.NewRemovePath(path), nil
+    }
+
+// ADD clause: ADD path value [, path value ...]
+AddClause
+  = _ AddToken _ head:AddAction tail:(_ ',' _ action:AddAction { return action, nil })* {
+      tracker := c.globalStore["sectionTracker"].(*sectionTracker)
+      if err := tracker.markAdd(); err != nil {
+        return nil, err
+      }
+      actions := astutil.HeadTailSlice[ast.AddAction](head, tail)
+      return ast.NewAddClause(actions), nil
+    }
+
+AddAction
+  = path:PathExpression _ value:Operand {
+      return ast.NewAddAction(path, value), nil
+    }
+
+// DELETE clause: DELETE path value [, path value ...]
+DeleteClause
+  = _ DeleteToken _ head:DeleteAction tail:(_ ',' _ action:DeleteAction { return action, nil })* {
+      tracker := c.globalStore["sectionTracker"].(*sectionTracker)
+      if err := tracker.markDelete(); err != nil {
+        return nil, err
+      }
+      actions := astutil.HeadTailSlice[ast.DeleteAction](head, tail)
+      return ast.NewDeleteClause(actions), nil
+    }
+
+DeleteAction
+  = path:PathExpression _ value:Operand {
+      return ast.NewDeleteAction(path, value), nil
+    }
+
+Operand
+  = '(' _ '(' _ value:Operand _ ')' _ ')' {
+      return nil, fmt.Errorf("The expression has redundant parentheses;")
+    }
+  / '(' _ value:Operand _ ')' {
+      return value, nil
+    }
+  / IfNotExistsFunction
+  / ListAppendFunction
+  / ExpressionAttributeValue
+  / PathExpression
+
+IfNotExistsFunction
+  = "if_not_exists"i _ '(' _ path:PathExpression _ ',' _ value:Operand _ ')' {
+      return ast.NewIfNotExists(path, value), nil
+    }
+
+ListAppendFunction
+  = "list_append"i _ '(' _ list1:Operand _ ',' _ list2:Operand _ ')' {
+      return ast.NewListAppend(list1, list2), nil
+    }
+
+ExpressionAttributeName
+  = !ReservedWord head:"#" tail:IdentifierPart* {
+      return ast.NewExpressionAttributeName(string(c.text)), nil
+    }
+
+ExpressionAttributeValue
+  = !ReservedWord head:":" tail:IdentifierPart* {
+      return ast.NewExpressionAttributeValue(string(c.text)), nil
+    }
+
+PathExpression
+  = head:GroupedPathExpression tail:(
+      _ '[' _ idx:[0-9]+ _ ']' {
+        return astutil.Atoi(strings.Trim(string(c.text), "[]")), nil
+      }
+    / _ '.' _ prop:Identifier {
+        return prop, nil
+      }
+    )* {
+      return ast.NewAttributePath(head, tail), nil
+    }
+
+GroupedPathExpression
+  = Identifier
+  / '(' _ '(' _ path:PathExpression _ ')' _ ')' {
+      // Reject redundant parentheses like DynamoDB does
+      return nil, fmt.Errorf("The expression has redundant parentheses;")
+    }
+  / '(' _ path:PathExpression _ ')' {
+      return path, nil
+    }
+
+Identifier
+  = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
+      return astutil.HeadTailString(head, tail), nil
+    }
+  / ExpressionAttributeName
+
+IdentifierStart
+  = [a-zA-Z]
+  / "_"
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+// Reserved words for UpdateExpression (only clause keywords)
+ReservedWord
+  = SetToken
+  / RemoveToken
+  / AddToken
+  / DeleteToken
+
+SetToken = "SET"i !IdentifierPart
+RemoveToken = "REMOVE"i !IdentifierPart
+AddToken = "ADD"i !IdentifierPart
+DeleteToken = "DELETE"i !IdentifierPart
+
+_ "whitespace"
+  = [ \t\r\n]*

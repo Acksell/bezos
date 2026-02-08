@@ -80,3 +80,14 @@ func Join(group any) string {
 func HeadTailList(head any, tail any) []any {
 	return append([]any{head}, ToSlice[any](tail, "astutil.HeadTailList")...)
 }
+
+// HeadTailSlice is a generic version of HeadTailList that returns a typed slice.
+func HeadTailSlice[T any](head any, tail any) []T {
+	h := CastTo[T](head, "astutil.HeadTailSlice head")
+	result := []T{h}
+	if tail == nil {
+		return result
+	}
+	t := ToSlice[T](tail, "astutil.HeadTailSlice tail")
+	return append(result, t...)
+}

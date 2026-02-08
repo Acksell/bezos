@@ -3,6 +3,8 @@ package ddbstore
 import (
 	"bezos/dynamodb/ddbstore/keyconditions"
 	"bezos/dynamodb/ddbstore/keyconditions/ast"
+	"bezos/dynamodb/ddbstore/updateexpressions"
+	updateast "bezos/dynamodb/ddbstore/updateexpressions/ast"
 	"bezos/dynamodb/ddbstore/writeconditions"
 	"bezos/dynamodb/table"
 	"bytes"
@@ -785,8 +787,6 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 }
 
 // UpdateItem updates an existing item or creates a new one.
-// Note: This is a simplified implementation that doesn't support UpdateExpression.
-// It performs a read-modify-write operation.
 func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
 	if params == nil {
 		return nil, fmt.Errorf("params is required")
@@ -794,15 +794,132 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 	if params.Key == nil {
 		return nil, fmt.Errorf("key is required")
 	}
-
-	// TODO: Implement UpdateExpression parsing and evaluation
-	// For now, this is a stub that returns an error
-	if params.UpdateExpression != nil {
-		return nil, fmt.Errorf("UpdateExpression not yet implemented")
+	if params.UpdateExpression == nil {
+		return nil, fmt.Errorf("UpdateExpression is required")
 	}
 
-	// Without UpdateExpression, there's nothing to update
-	return nil, fmt.Errorf("UpdateExpression is required")
+	schema, err := s.getTable(params.TableName)
+	if err != nil {
+		return nil, err
+	}
+
+	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
+	if err != nil {
+		return nil, fmt.Errorf("extract primary key: %w", err)
+	}
+
+	key, err := schema.encoder.EncodeKey(pk)
+	if err != nil {
+		return nil, fmt.Errorf("encode key: %w", err)
+	}
+
+	// Parse the update expression
+	updateExpr, err := updateexpressions.Parse(*params.UpdateExpression)
+	if err != nil {
+		return nil, fmt.Errorf("parse update expression: %w", err)
+	}
+
+	var oldItem map[string]types.AttributeValue
+	var newItem map[string]types.AttributeValue
+
+	err = s.db.Update(func(txn *badger.Txn) error {
+		// Get existing item
+		existingItem, err := txn.Get(key)
+		if err != nil && err != badger.ErrKeyNotFound {
+			return err
+		}
+
+		if err != badger.ErrKeyNotFound {
+			// Item exists
+			if err := existingItem.Value(func(val []byte) error {
+				oldItem, err = DeserializeItem(val)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+
+		// Evaluate condition expression if present
+		if params.ConditionExpression != nil {
+			input := writeconditions.EvalInput{
+				ExpressionValues: params.ExpressionAttributeValues,
+				ExpressionNames:  params.ExpressionAttributeNames,
+			}
+			valid, err := writeconditions.Eval(*params.ConditionExpression, input, oldItem)
+			if err != nil {
+				return fmt.Errorf("evaluate condition: %w", err)
+			}
+			if !valid {
+				return &types.ConditionalCheckFailedException{
+					Message: ptrStr("The conditional request failed"),
+				}
+			}
+		}
+
+		// Start with existing item or empty item, and add the key attributes
+		if oldItem != nil {
+			newItem = make(map[string]types.AttributeValue, len(oldItem))
+			for k, v := range oldItem {
+				newItem[k] = v
+			}
+		} else {
+			newItem = make(map[string]types.AttributeValue)
+		}
+
+		// Ensure key attributes are present
+		for k, v := range params.Key {
+			newItem[k] = v
+		}
+
+		// Apply the update expression
+		evalInput := updateexpressions.EvalInput{
+			ExpressionNames:  params.ExpressionAttributeNames,
+			ExpressionValues: params.ExpressionAttributeValues,
+		}
+		newItem, err = updateexpressions.Apply(updateExpr, evalInput, newItem)
+		if err != nil {
+			return fmt.Errorf("apply update expression: %w", err)
+		}
+
+		// Serialize and write the updated item
+		itemBytes, err := SerializeItem(newItem)
+		if err != nil {
+			return fmt.Errorf("serialize item: %w", err)
+		}
+
+		if err := txn.Set(key, itemBytes); err != nil {
+			return err
+		}
+
+		// Handle GSI updates
+		for _, gsi := range schema.gsis {
+			if err := s.updateGSI(txn, gsi, newItem, oldItem); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	out := &dynamodb.UpdateItemOutput{}
+	switch params.ReturnValues {
+	case types.ReturnValueAllOld:
+		out.Attributes = oldItem
+	case types.ReturnValueAllNew:
+		out.Attributes = newItem
+	case types.ReturnValueUpdatedOld:
+		// Return only the attributes that were updated with their old values
+		out.Attributes = extractUpdatedAttributes(updateExpr, oldItem)
+	case types.ReturnValueUpdatedNew:
+		// Return only the attributes that were updated with their new values
+		out.Attributes = extractUpdatedAttributes(updateExpr, newItem)
+	}
+
+	return out, nil
 }
 
 // BatchGetItem retrieves multiple items by their primary keys.
@@ -1345,4 +1462,54 @@ func incrementBytes(b []byte) []byte {
 	}
 	// Overflow - append 0x00
 	return append(result, 0x00)
+}
+
+// extractUpdatedAttributes extracts attributes that were modified by an update expression.
+func extractUpdatedAttributes(expr *updateast.UpdateExpression, item map[string]types.AttributeValue) map[string]types.AttributeValue {
+	if item == nil {
+		return nil
+	}
+	result := make(map[string]types.AttributeValue)
+
+	// Extract paths from SET actions
+	for _, action := range expr.SetActions {
+		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
+			name := action.Path.Parts[0].Identifier.GetName(nil)
+			if val, ok := item[name]; ok {
+				result[name] = val
+			}
+		}
+	}
+
+	// Extract paths from REMOVE actions
+	for _, action := range expr.RemoveActions {
+		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
+			name := action.Path.Parts[0].Identifier.GetName(nil)
+			if val, ok := item[name]; ok {
+				result[name] = val
+			}
+		}
+	}
+
+	// Extract paths from ADD actions
+	for _, action := range expr.AddActions {
+		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
+			name := action.Path.Parts[0].Identifier.GetName(nil)
+			if val, ok := item[name]; ok {
+				result[name] = val
+			}
+		}
+	}
+
+	// Extract paths from DELETE actions
+	for _, action := range expr.DeleteActions {
+		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
+			name := action.Path.Parts[0].Identifier.GetName(nil)
+			if val, ok := item[name]; ok {
+				result[name] = val
+			}
+		}
+	}
+
+	return result
 }
