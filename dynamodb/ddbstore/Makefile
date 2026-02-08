@@ -4,10 +4,10 @@ install:
 	go install github.com/mna/pigeon@latest
 
 gen:
-	pigeon -o conditionexpressions/parser/parser_gen.go conditionexpressions/parser/cond_expr.peg
-	pigeon -o keyconditions/parser/parser_gen.go keyconditions/parser/key_cond_expr.peg
-	pigeon -o updateexpressions/parser/parser_gen.go updateexpressions/parser/update_expr.peg
-	pigeon -o projectionexpressions/parser/parser_gen.go projectionexpressions/parser/projection_expr.peg
+	pigeon -o conditionexpr/parser/parser_gen.go conditionexpr/parser/cond_expr.peg
+	pigeon -o keyconditionexpr/parser/parser_gen.go keyconditionexpr/parser/key_cond_expr.peg
+	pigeon -o updateexpr/parser/parser_gen.go updateexpr/parser/update_expr.peg
+	pigeon -o projectionexpr/parser/parser_gen.go projectionexpr/parser/projection_expr.peg
 
 test:
 	go test ./...

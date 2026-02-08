@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/ast"
 )
 
 func (c *current) paramsFromStore() *KeyConditionParserParams {

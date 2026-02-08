@@ -1,10 +1,10 @@
-package conditionexpressions
+package conditionexpr
 
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions/parser"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpr/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpr/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

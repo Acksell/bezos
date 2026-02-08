@@ -6,17 +6,17 @@
 //
 // Example usage:
 //
-//	projected, err := projectionexpressions.Project(expr, names, doc)
+//	projected, err := projectionexpr.Project(expr, names, doc)
 //	if err != nil {
 //	    return err
 //	}
-package projectionexpressions
+package projectionexpr
 
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/parser"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpr/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpr/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/ast"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 

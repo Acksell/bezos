@@ -1,4 +1,4 @@
-package updateexpressions
+package updateexpr
 
 import (
 	"testing"

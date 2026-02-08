@@ -1,10 +1,10 @@
-package keyconditions
+package keyconditionexpr
 
 import (
 	"fmt"
 	"testing"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/ast"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -219,7 +219,7 @@ func TestKeyCondition(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to build expression: %v", err)
 			}
-			in := KeyConditionParams{
+			in := ParseParams{
 				TableKeys:                 tt.keyNames,
 				ExpressionAttributeNames:  expr.Names(),
 				ExpressionAttributeValues: expr.Values(),

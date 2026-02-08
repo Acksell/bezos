@@ -1,4 +1,4 @@
-package projectionexpressions
+package projectionexpr
 
 import "fmt"
 

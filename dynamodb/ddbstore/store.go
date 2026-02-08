@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions"
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions"
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions"
-	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpr"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpr"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpr"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -163,7 +163,7 @@ func (s *Store) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optF
 	}
 
 	// Apply projection expression if specified
-	item, err = projectionexpressions.Project(params.ProjectionExpression, params.ExpressionAttributeNames, item)
+	item, err = projectionexpr.Project(params.ProjectionExpression, params.ExpressionAttributeNames, item)
 	if err != nil {
 		return nil, err
 	}
@@ -220,11 +220,11 @@ func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optF
 
 			// Evaluate condition expression
 			if params.ConditionExpression != nil {
-				input := conditionexpressions.EvalInput{
+				input := conditionexpr.EvalInput{
 					ExpressionValues: params.ExpressionAttributeValues,
 					ExpressionNames:  params.ExpressionAttributeNames,
 				}
-				valid, err := conditionexpressions.Eval(*params.ConditionExpression, input, oldItem)
+				valid, err := conditionexpr.Eval(*params.ConditionExpression, input, oldItem)
 				if err != nil {
 					return fmt.Errorf("evaluate condition: %w", err)
 				}
@@ -236,11 +236,11 @@ func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optF
 			}
 		} else if params.ConditionExpression != nil {
 			// Item doesn't exist - evaluate condition against empty document
-			input := conditionexpressions.EvalInput{
+			input := conditionexpr.EvalInput{
 				ExpressionValues: params.ExpressionAttributeValues,
 				ExpressionNames:  params.ExpressionAttributeNames,
 			}
-			valid, err := conditionexpressions.Eval(*params.ConditionExpression, input, nil)
+			valid, err := conditionexpr.Eval(*params.ConditionExpression, input, nil)
 			if err != nil {
 				return fmt.Errorf("evaluate condition: %w", err)
 			}
@@ -389,11 +389,11 @@ func (s *Store) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput
 
 		// Evaluate condition expression
 		if params.ConditionExpression != nil {
-			input := conditionexpressions.EvalInput{
+			input := conditionexpr.EvalInput{
 				ExpressionValues: params.ExpressionAttributeValues,
 				ExpressionNames:  params.ExpressionAttributeNames,
 			}
-			valid, err := conditionexpressions.Eval(*params.ConditionExpression, input, oldItem)
+			valid, err := conditionexpr.Eval(*params.ConditionExpression, input, oldItem)
 			if err != nil {
 				return fmt.Errorf("evaluate condition: %w", err)
 			}
@@ -452,7 +452,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 	}
 
 	// Parse the key condition expression
-	keyCond, err := keyconditions.Parse(*params.KeyConditionExpression, keyconditions.KeyConditionParams{
+	keyCond, err := keyconditionexpr.Parse(*params.KeyConditionExpression, keyconditionexpr.ParseParams{
 		ExpressionAttributeNames:  params.ExpressionAttributeNames,
 		ExpressionAttributeValues: params.ExpressionAttributeValues,
 		TableKeys:                 schema.definition.KeyDefinitions,
@@ -549,11 +549,11 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 
 			// Apply filter expression if present
 			if params.FilterExpression != nil {
-				input := conditionexpressions.EvalInput{
+				input := conditionexpr.EvalInput{
 					ExpressionValues: params.ExpressionAttributeValues,
 					ExpressionNames:  params.ExpressionAttributeNames,
 				}
-				matches, err := conditionexpressions.Eval(*params.FilterExpression, input, item)
+				matches, err := conditionexpr.Eval(*params.FilterExpression, input, item)
 				if err != nil {
 					return fmt.Errorf("evaluate filter: %w", err)
 				}
@@ -582,7 +582,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 	}
 
 	// Apply projection expression to results
-	items, err = projectionexpressions.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
+	items, err = projectionexpr.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
 	if err != nil {
 		return nil, err
 	}
@@ -758,11 +758,11 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 
 			// Apply filter expression if present
 			if params.FilterExpression != nil {
-				input := conditionexpressions.EvalInput{
+				input := conditionexpr.EvalInput{
 					ExpressionValues: params.ExpressionAttributeValues,
 					ExpressionNames:  params.ExpressionAttributeNames,
 				}
-				matches, err := conditionexpressions.Eval(*params.FilterExpression, input, item)
+				matches, err := conditionexpr.Eval(*params.FilterExpression, input, item)
 				if err != nil {
 					return fmt.Errorf("evaluate filter: %w", err)
 				}
@@ -790,7 +790,7 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 	}
 
 	// Apply projection expression to results
-	items, err = projectionexpressions.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
+	items, err = projectionexpr.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
 	if err != nil {
 		return nil, err
 	}
@@ -832,12 +832,12 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 	}
 
 	// Parse the update expression
-	updateExpr, err := updateexpressions.Parse(*params.UpdateExpression)
+	updateExpr, err := updateexpr.Parse(*params.UpdateExpression)
 	if err != nil {
 		return nil, fmt.Errorf("parse update expression: %w", err)
 	}
 
-	var evalOutput *updateexpressions.EvalOutput
+	var evalOutput *updateexpr.EvalOutput
 
 	err = s.db.Update(func(txn *badger.Txn) error {
 		// Get existing item
@@ -859,11 +859,11 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 
 		// Evaluate condition expression if present
 		if params.ConditionExpression != nil {
-			input := conditionexpressions.EvalInput{
+			input := conditionexpr.EvalInput{
 				ExpressionValues: params.ExpressionAttributeValues,
 				ExpressionNames:  params.ExpressionAttributeNames,
 			}
-			valid, err := conditionexpressions.Eval(*params.ConditionExpression, input, oldItem)
+			valid, err := conditionexpr.Eval(*params.ConditionExpression, input, oldItem)
 			if err != nil {
 				return fmt.Errorf("evaluate condition: %w", err)
 			}
@@ -884,12 +884,12 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 		}
 
 		// Apply the update expression with return values handling
-		evalInput := updateexpressions.EvalInput{
+		evalInput := updateexpr.EvalInput{
 			ExpressionNames:  params.ExpressionAttributeNames,
 			ExpressionValues: params.ExpressionAttributeValues,
 			ReturnValues:     params.ReturnValues,
 		}
-		evalOutput, err = updateexpressions.Apply(updateExpr, evalInput, baseItem)
+		evalOutput, err = updateexpr.Apply(updateExpr, evalInput, baseItem)
 		if err != nil {
 			return fmt.Errorf("apply update expression: %w", err)
 		}
@@ -981,7 +981,7 @@ func (s *Store) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemI
 				}
 
 				// Apply projection expression if specified
-				item, err = projectionexpressions.Project(keysAndAttrs.ProjectionExpression, keysAndAttrs.ExpressionAttributeNames, item)
+				item, err = projectionexpr.Project(keysAndAttrs.ProjectionExpression, keysAndAttrs.ExpressionAttributeNames, item)
 				if err != nil {
 					return err
 				}
@@ -1167,7 +1167,7 @@ func (s *Store) TransactGetItems(ctx context.Context, params *dynamodb.TransactG
 			}
 
 			// Apply projection expression if specified
-			docItem, err = projectionexpressions.Project(item.Get.ProjectionExpression, item.Get.ExpressionAttributeNames, docItem)
+			docItem, err = projectionexpr.Project(item.Get.ProjectionExpression, item.Get.ExpressionAttributeNames, docItem)
 			if err != nil {
 				return err
 			}
@@ -1222,11 +1222,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 						})
 					}
 
-					input := conditionexpressions.EvalInput{
+					input := conditionexpr.EvalInput{
 						ExpressionValues: item.Put.ExpressionAttributeValues,
 						ExpressionNames:  item.Put.ExpressionAttributeNames,
 					}
-					valid, err := conditionexpressions.Eval(*item.Put.ConditionExpression, input, existingItem)
+					valid, err := conditionexpr.Eval(*item.Put.ConditionExpression, input, existingItem)
 					if err != nil {
 						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
 					}
@@ -1262,11 +1262,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 						})
 					}
 
-					input := conditionexpressions.EvalInput{
+					input := conditionexpr.EvalInput{
 						ExpressionValues: item.Delete.ExpressionAttributeValues,
 						ExpressionNames:  item.Delete.ExpressionAttributeNames,
 					}
-					valid, err := conditionexpressions.Eval(*item.Delete.ConditionExpression, input, existingItem)
+					valid, err := conditionexpr.Eval(*item.Delete.ConditionExpression, input, existingItem)
 					if err != nil {
 						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
 					}
@@ -1301,11 +1301,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 					})
 				}
 
-				input := conditionexpressions.EvalInput{
+				input := conditionexpr.EvalInput{
 					ExpressionValues: item.ConditionCheck.ExpressionAttributeValues,
 					ExpressionNames:  item.ConditionCheck.ExpressionAttributeNames,
 				}
-				valid, err := conditionexpressions.Eval(*item.ConditionCheck.ConditionExpression, input, existingItem)
+				valid, err := conditionexpr.Eval(*item.ConditionCheck.ConditionExpression, input, existingItem)
 				if err != nil {
 					return fmt.Errorf("item %d: evaluate condition: %w", i, err)
 				}
@@ -1341,11 +1341,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 
 				// Evaluate condition expression if present
 				if item.Update.ConditionExpression != nil {
-					input := conditionexpressions.EvalInput{
+					input := conditionexpr.EvalInput{
 						ExpressionValues: item.Update.ExpressionAttributeValues,
 						ExpressionNames:  item.Update.ExpressionAttributeNames,
 					}
-					valid, err := conditionexpressions.Eval(*item.Update.ConditionExpression, input, existingItem)
+					valid, err := conditionexpr.Eval(*item.Update.ConditionExpression, input, existingItem)
 					if err != nil {
 						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
 					}
@@ -1474,7 +1474,7 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 				// Parse and apply the update expression
-				updateExpr, err := updateexpressions.Parse(*item.Update.UpdateExpression)
+				updateExpr, err := updateexpr.Parse(*item.Update.UpdateExpression)
 				if err != nil {
 					return fmt.Errorf("parse update expression: %w", err)
 				}
@@ -1489,11 +1489,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 				// Apply the update expression
-				evalInput := updateexpressions.EvalInput{
+				evalInput := updateexpr.EvalInput{
 					ExpressionNames:  item.Update.ExpressionAttributeNames,
 					ExpressionValues: item.Update.ExpressionAttributeValues,
 				}
-				evalOutput, err := updateexpressions.Apply(updateExpr, evalInput, baseItem)
+				evalOutput, err := updateexpr.Apply(updateExpr, evalInput, baseItem)
 				if err != nil {
 					return fmt.Errorf("apply update expression: %w", err)
 				}

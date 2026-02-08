@@ -1,11 +1,11 @@
 // Package updateexpressions provides parsing and evaluation of DynamoDB UpdateExpressions.
-package updateexpressions
+package updateexpr
 
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/parser"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpr/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpr/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

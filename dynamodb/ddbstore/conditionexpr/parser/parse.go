@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpr/ast"
 )
 
 func ParseExpr(condition string) (cond ast.Condition, err error) {

@@ -1,28 +1,28 @@
-package keyconditions
+package keyconditionexpr
 
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/parser"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditionexpr/parser"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 // External API for the parser.
-type KeyConditionParams struct {
+type ParseParams struct {
 	ExpressionAttributeNames  map[string]string
 	ExpressionAttributeValues map[string]types.AttributeValue
 	TableKeys                 table.PrimaryKeyDefinition
 }
 
-func Parse(expr string, params KeyConditionParams) (*ast.KeyCondition, error) {
+func Parse(expr string, params ParseParams) (*ast.KeyCondition, error) {
 	parserParams := toParserParams(params)
 	return parser.ParseExpr(expr, *parserParams)
 }
 
-func toParserParams(params KeyConditionParams) *parser.KeyConditionParserParams {
+func toParserParams(params ParseParams) *parser.KeyConditionParserParams {
 	return &parser.KeyConditionParserParams{
 		ExpressionKeyNames:  params.ExpressionAttributeNames,
 		ExpressionKeyValues: toKeyValues(params.ExpressionAttributeValues),

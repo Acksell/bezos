@@ -17,7 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
-	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpr/ast"
 )
 
 var g = &grammar{

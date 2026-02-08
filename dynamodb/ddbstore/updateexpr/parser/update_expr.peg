@@ -5,7 +5,7 @@
     "fmt"
     "strings"
 
-    "github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
+    "github.com/acksell/bezos/dynamodb/ddbstore/updateexpr/ast"
     "github.com/acksell/bezos/dynamodb/ddbstore/astutil"
   )
 

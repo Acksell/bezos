@@ -1,4 +1,4 @@
-package conditionexpressions
+package conditionexpr
 
 import (
 	"fmt"
