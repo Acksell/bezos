@@ -5,8 +5,8 @@
     "fmt"
     "strings"
 
-    "bezos/dynamodb/ddbstore/updateexpressions/ast"
-    "bezos/dynamodb/ddbstore/astutil"
+    "github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
+    "github.com/acksell/bezos/dynamodb/ddbstore/astutil"
   )
 
   // sectionTracker tracks which sections have been seen to enforce uniqueness

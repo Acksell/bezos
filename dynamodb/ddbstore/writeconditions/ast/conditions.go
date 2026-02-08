@@ -5,8 +5,9 @@ It is not used for queries. For queries, use keyconditionast, filterexpressionas
 package ast
 
 import (
-	"bezos/dynamodb/ddbstore/astutil"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
 )
 
 // Condition is the root interface for all AST nodes for Conditions.

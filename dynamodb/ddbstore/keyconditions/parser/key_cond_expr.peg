@@ -5,8 +5,8 @@
         "fmt"
         "strings"
 
-        "bezos/dynamodb/ddbstore/keyconditions/ast"
-        "bezos/dynamodb/ddbstore/astutil"
+        "github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+        "github.com/acksell/bezos/dynamodb/ddbstore/astutil"
     )
 
     func (c *current) paramsFromStore() *KeyConditionParserParams {

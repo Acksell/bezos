@@ -1,8 +1,8 @@
 package ddbsdk
 
 import (
-	"bezos/dynamodb/ddbstore"
-	"bezos/dynamodb/table"
+	"github.com/acksell/bezos/dynamodb/ddbstore"
+	"github.com/acksell/bezos/dynamodb/table"
 )
 
 func NewMock(defs ...table.TableDefinition) IO {

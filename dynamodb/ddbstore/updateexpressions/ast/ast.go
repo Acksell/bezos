@@ -17,8 +17,9 @@
 package ast
 
 import (
-	"bezos/dynamodb/ddbstore/astutil"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
 )
 
 // UpdateExpression represents the full parsed update expression.

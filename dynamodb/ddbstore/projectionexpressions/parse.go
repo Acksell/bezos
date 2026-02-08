@@ -13,9 +13,10 @@
 package projectionexpressions
 
 import (
-	"bezos/dynamodb/ddbstore/projectionexpressions/ast"
-	"bezos/dynamodb/ddbstore/projectionexpressions/parser"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

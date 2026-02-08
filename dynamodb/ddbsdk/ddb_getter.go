@@ -1,8 +1,9 @@
 package ddbsdk
 
 import (
-	"bezos/dynamodb/table"
 	"context"
+
+	"github.com/acksell/bezos/dynamodb/table"
 )
 
 type getter struct {

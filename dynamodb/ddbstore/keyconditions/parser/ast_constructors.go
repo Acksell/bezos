@@ -1,10 +1,11 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/astutil"
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/table"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/table"
 )
 
 //todo add some more of these, instead of defining them inline in the peg file, so that we can test them.

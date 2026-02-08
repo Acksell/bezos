@@ -1,9 +1,10 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/table"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/table"
 )
 
 // Internal API for the parser

@@ -2,9 +2,10 @@
 package updateexpressions
 
 import (
-	"bezos/dynamodb/ddbstore/updateexpressions/ast"
-	"bezos/dynamodb/ddbstore/updateexpressions/parser"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

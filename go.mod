@@ -1,4 +1,4 @@
-module bezos
+module github.com/acksell/bezos
 
 go 1.23.0
 

@@ -1,10 +1,11 @@
 package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/table"
 	"fmt"
 	"testing"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"github.com/stretchr/testify/require"

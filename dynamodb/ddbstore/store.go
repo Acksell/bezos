@@ -1,16 +1,17 @@
 package ddbstore
 
 import (
-	"bezos/dynamodb/ddbstore/keyconditions"
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/ddbstore/projectionexpressions"
-	"bezos/dynamodb/ddbstore/updateexpressions"
-	"bezos/dynamodb/ddbstore/writeconditions"
-	"bezos/dynamodb/table"
 	"bytes"
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions"
+	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions"
+	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"

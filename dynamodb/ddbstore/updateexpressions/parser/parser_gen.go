@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"bezos/dynamodb/ddbstore/astutil"
-	"bezos/dynamodb/ddbstore/updateexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
 )
 
 // sectionTracker tracks which sections have been seen to enforce uniqueness

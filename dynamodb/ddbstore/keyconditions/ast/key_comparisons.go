@@ -1,8 +1,9 @@
 package ast
 
 import (
-	"bezos/dynamodb/ddbstore/astutil"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
 )
 
 func (left *KeyValue) Equal(right *KeyValue) bool {

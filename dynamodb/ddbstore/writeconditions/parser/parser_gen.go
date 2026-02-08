@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"bezos/dynamodb/ddbstore/astutil"
-	"bezos/dynamodb/ddbstore/writeconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/astutil"
+	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/ast"
 )
 
 var g = &grammar{

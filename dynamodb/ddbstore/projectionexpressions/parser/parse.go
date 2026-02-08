@@ -1,8 +1,9 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/projectionexpressions/ast"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/projectionexpressions/ast"
 )
 
 // ParseExpr parses a ProjectionExpression string into an AST.

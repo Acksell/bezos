@@ -1,8 +1,9 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/updateexpressions/ast"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/updateexpressions/ast"
 )
 
 // ParseExpr parses an UpdateExpression string into an AST.

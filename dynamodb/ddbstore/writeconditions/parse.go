@@ -1,9 +1,10 @@
 package writeconditions
 
 import (
-	"bezos/dynamodb/ddbstore/writeconditions/ast"
-	"bezos/dynamodb/ddbstore/writeconditions/parser"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

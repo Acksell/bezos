@@ -1,8 +1,9 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/writeconditions/ast"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/ast"
 )
 
 func ParseExpr(condition string) (cond ast.Condition, err error) {

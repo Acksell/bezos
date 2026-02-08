@@ -1,9 +1,10 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/table"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/table"
 )
 
 // structs in this file require a second pass to convert to the AST.

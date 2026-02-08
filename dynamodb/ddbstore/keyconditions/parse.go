@@ -1,10 +1,11 @@
 package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/keyconditions/ast"
-	"bezos/dynamodb/ddbstore/keyconditions/parser"
-	"bezos/dynamodb/table"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/keyconditions/parser"
+	"github.com/acksell/bezos/dynamodb/table"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

@@ -1,8 +1,9 @@
 package ddbsdk
 
 import (
-	"bezos/dynamodb/table"
 	"fmt"
+
+	"github.com/acksell/bezos/dynamodb/table"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
