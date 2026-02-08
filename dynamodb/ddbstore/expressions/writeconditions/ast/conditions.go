@@ -327,10 +327,10 @@ func resolvePath(path []*AttributePathPart, input Input, doc map[string]Attribut
 	var exists bool
 	traversed := path[0].toString(input)
 	if doc == nil {
-		panic("document is nil, can't resolve path to attributevalue")
+		return AttributeValue{}, false
 	}
 	if attr, exists = doc[traversed]; !exists {
-		panic(fmt.Sprintf("attribute %s not found", traversed))
+		return AttributeValue{}, false
 	}
 
 	// follow the path
@@ -342,14 +342,14 @@ func resolvePath(path []*AttributePathPart, input Input, doc map[string]Attribut
 			attr, exists = astutil.CastTo[map[string]AttributeValue](attr.Value)[next]
 			traversed += "." + next
 			if !exists {
-				panic(fmt.Sprintf("attribute %s not found", traversed))
+				return AttributeValue{}, false
 			}
 		case LIST:
 			idx := part.toInt()
 			val := astutil.CastTo[[]AttributeValue](attr.Value)
 			traversed += fmt.Sprintf("[%d]", idx)
 			if idx < 0 || idx >= len(val) {
-				panic(fmt.Sprintf("index %d out of bounds on %s", idx, traversed))
+				return AttributeValue{}, false
 			}
 			attr = val[idx]
 		default:
@@ -491,9 +491,6 @@ func (f *FunctionCall) Eval(input Input, doc map[string]AttributeValue) bool {
 }
 
 func (f *FunctionCall) attributeExists(input Input, doc map[string]AttributeValue) bool {
-	if doc == nil {
-		return false
-	}
 	path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_exist first arg")
 	_, exists := resolvePath(path.Parts, input, doc)
 	return exists

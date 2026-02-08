@@ -6,8 +6,10 @@ import (
 )
 
 func NewMock(defs ...table.TableDefinition) IO {
-	mock := ddbstore.NewStore(defs...)
-	// works if mockddb.NewStore() is a good enough mock of AWSDynamoClientV2 iface
+	mock, err := ddbstore.New(ddbstore.StoreOptions{InMemory: true}, defs...)
+	if err != nil {
+		panic(err)
+	}
 	// todo implement projection expressions
 	return New(mock)
 }

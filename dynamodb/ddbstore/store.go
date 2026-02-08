@@ -1,192 +1,120 @@
 package ddbstore
 
 import (
+	"bezos/dynamodb/ddbstore/expressions/keyconditions"
+	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
 	"bezos/dynamodb/ddbstore/expressions/writeconditions"
 	"bezos/dynamodb/table"
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-
-	"github.com/google/btree"
+	"github.com/dgraph-io/badger/v4"
 )
 
-var errNotFound = fmt.Errorf("not found")
-
-func NewStore(defs ...table.TableDefinition) *mockStore {
-	tables := make(map[string]*mockTable)
-	for _, t := range defs {
-		gsis := make(map[string]*mockTable)
-		for _, gsi := range t.GSIs {
-			gsiTable := &mockTable{
-				definition: gsi,
-				store:      make(map[partitionKey]*btree.BTreeG[*document]),
-			}
-			gsis[gsi.Name] = gsiTable
-		}
-		tables[t.Name] = &mockTable{
-			definition: t,
-			gsis:       gsis,
-			store:      make(map[partitionKey]*btree.BTreeG[*document]),
-		}
-	}
-	return &mockStore{
-		tables: tables,
-	}
+// Store is a DynamoDB-compatible store backed by BadgerDB.
+// It provides full ACID guarantees and supports all major DynamoDB operations.
+type Store struct {
+	db     *badger.DB
+	tables map[string]*tableSchema
 }
 
-type mockStore struct {
-	tables map[string]*mockTable
-}
-
-func (s *mockStore) getTable(tableName *string) (*mockTable, error) {
-	if tableName == nil {
-		return nil, fmt.Errorf("table name is required")
-	}
-	table, ok := s.tables[*tableName]
-	if !ok {
-		return nil, fmt.Errorf("table not found: %s, %v", *tableName, s.tables)
-	}
-	return table, nil
-}
-
-type mockTable struct {
+type tableSchema struct {
 	definition table.TableDefinition
-	// A store with partition key as primary key and a btree for sort keys.
-	// Probably overkill but the library wasn't too big, and API works well.
-	store map[partitionKey]*btree.BTreeG[*document]
-	gsis  map[string]*mockTable
+	encoder    *KeyEncoder
+	gsis       map[string]*tableSchema
 }
 
-type partitionKey any
-
-type document struct {
-	pk    table.PrimaryKey
-	value map[string]types.AttributeValue
+// StoreOptions configures the BadgerDB store.
+type StoreOptions struct {
+	// Path to the database directory. If empty, uses in-memory mode.
+	Path string
+	// InMemory forces in-memory mode even if Path is set.
+	InMemory bool
+	// Logger for BadgerDB. If nil, logging is disabled.
+	Logger badger.Logger
 }
 
-func less(l *document, r *document) bool {
-	if l.pk.Definition.SortKey.Kind != r.pk.Definition.SortKey.Kind {
-		panic("sort key kind mismatch") // should not happen
+// New creates a new BadgerDB-backed DynamoDB store.
+func New(opts StoreOptions, defs ...table.TableDefinition) (*Store, error) {
+	badgerOpts := badger.DefaultOptions(opts.Path)
+
+	if opts.Path == "" || opts.InMemory {
+		badgerOpts = badgerOpts.WithInMemory(true)
 	}
-	switch l.pk.Definition.SortKey.Kind {
-	case table.KeyKindS, table.KeyKindB:
-		return mustConvToString(l.pk.Values.SortKey) < mustConvToString(r.pk.Values.SortKey)
-	case table.KeyKindN:
-		return mustConvFloat64(l.pk.Values.SortKey) < mustConvFloat64(r.pk.Values.SortKey)
-	default:
-		panic("unsupported key kind")
-	}
-}
 
-func (t *mockTable) extractPrimaryKey(item map[string]types.AttributeValue) (table.PrimaryKey, error) {
-	pk, err := t.definition.ExtractPrimaryKey(item) // todo maybe this function should be in this package instead
+	if opts.Logger != nil {
+		badgerOpts = badgerOpts.WithLogger(opts.Logger)
+	} else {
+		badgerOpts = badgerOpts.WithLogger(nil)
+	}
+
+	db, err := badger.Open(badgerOpts)
 	if err != nil {
-		return table.PrimaryKey{}, err
+		return nil, fmt.Errorf("open badger db: %w", err)
 	}
-	return pk, nil
-}
 
-func (t *mockTable) getStore(pk partitionKey) *btree.BTreeG[*document] {
-	store, ok := t.store[pk]
-	if !ok {
-		store = btree.NewG(2, less)
-		t.store[pk] = store
-	}
-	return store
-}
-
-// A subset of methods dealing with IO on documents. Not including PartiQL statements.
-func (s *mockStore) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
-	if params == nil {
-		return nil, fmt.Errorf("params is required")
-	}
-	if params.RequestItems == nil {
-		return nil, fmt.Errorf("request items is required")
-	}
-	response := &dynamodb.BatchGetItemOutput{
-		Responses:       make(map[string][]map[string]types.AttributeValue),
-		UnprocessedKeys: make(map[string]types.KeysAndAttributes),
-	}
-	for tableName, keys := range params.RequestItems {
-		table, err := s.getTable(&tableName)
-		if err != nil {
-			return nil, err
+	tables := make(map[string]*tableSchema)
+	for _, def := range defs {
+		schema := &tableSchema{
+			definition: def,
+			encoder:    NewKeyEncoder(def.Name, def.KeyDefinitions),
+			gsis:       make(map[string]*tableSchema),
 		}
-		for _, key := range keys.Keys {
-			pk, err := table.extractPrimaryKey(key)
-			if err != nil {
-				return nil, err
+
+		for _, gsiDef := range def.GSIs {
+			gsiSchema := &tableSchema{
+				definition: gsiDef,
+				encoder:    NewGSIKeyEncoder(def.Name, gsiDef.Name, gsiDef.KeyDefinitions),
 			}
-			store := table.getStore(pk.Values.PartitionKey)
-			doc, found := store.Get(&document{pk, nil})
-			if found {
-				// TODO: handle projection expression
-				// TODO: handle consistent read option
-				response.Responses[tableName] = append(response.Responses[tableName], doc.value)
-			} else {
-				// Retrieve the current value, modify it, and put it back
-				unprocessedKeys := response.UnprocessedKeys[tableName]
-				unprocessedKeys.Keys = append(unprocessedKeys.Keys, key)
-				response.UnprocessedKeys[tableName] = unprocessedKeys
-			}
+			schema.gsis[gsiDef.Name] = gsiSchema
 		}
+
+		tables[def.Name] = schema
 	}
 
-	return nil, nil
-}
-
-func (s *mockStore) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
-	if params == nil {
-		return nil, fmt.Errorf("params is required")
-	}
-	if params.RequestItems == nil {
-		return nil, fmt.Errorf("request items is required")
-	}
-	unprocessed := make(map[string][]types.WriteRequest)
-	for tableName, items := range params.RequestItems {
-		table, err := s.getTable(&tableName)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items {
-			switch {
-			case item.PutRequest != nil:
-				_, err := table.PutItem(ctx, &dynamodb.PutItemInput{
-					TableName: &tableName,
-					Item:      item.PutRequest.Item,
-				})
-				if err != nil {
-					unprocessed[tableName] = append(unprocessed[tableName], item)
-				}
-			case item.DeleteRequest != nil:
-				_, err := table.DeleteItem(ctx, &dynamodb.DeleteItemInput{
-					TableName: &tableName,
-					Key:       item.DeleteRequest.Key,
-				})
-				if err != nil {
-					unprocessed[tableName] = append(unprocessed[tableName], item)
-				}
-			default:
-				return nil, fmt.Errorf("empty write request, must be put or delete")
-			}
-		}
-	}
-	return &dynamodb.BatchWriteItemOutput{
-		UnprocessedItems: unprocessed,
+	return &Store{
+		db:     db,
+		tables: tables,
 	}, nil
 }
 
-func (s *mockStore) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
-	table, err := s.getTable(params.TableName)
+// Close closes the BadgerDB database.
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+func (s *Store) getTable(tableName *string) (*tableSchema, error) {
+	if tableName == nil {
+		return nil, fmt.Errorf("table name is required")
+	}
+	schema, ok := s.tables[*tableName]
+	if !ok {
+		return nil, fmt.Errorf("table not found: %s", *tableName)
+	}
+	return schema, nil
+}
+
+func (s *Store) getTableAndGSI(tableName *string, indexName *string) (*tableSchema, error) {
+	schema, err := s.getTable(tableName)
 	if err != nil {
 		return nil, err
 	}
-	return table.DeleteItem(ctx, params, optFns...)
+	if indexName == nil || *indexName == "" {
+		return schema, nil
+	}
+	gsi, ok := schema.gsis[*indexName]
+	if !ok {
+		return nil, fmt.Errorf("GSI not found: %s", *indexName)
+	}
+	return gsi, nil
 }
 
-func (t *mockTable) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+// GetItem retrieves a single item by its primary key.
+func (s *Store) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
 	if params == nil {
 		return nil, fmt.Errorf("params is required")
 	}
@@ -194,247 +122,1227 @@ func (t *mockTable) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemI
 		return nil, fmt.Errorf("key is required")
 	}
 
-	pk, err := t.extractPrimaryKey(params.Key)
+	schema, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	store := t.getStore(pk.Values.PartitionKey)
-	old, _ := store.Delete(&document{pk, nil})
-
-	if t.definition.IsGSI { // if it's a GSI we can return early here.
-		return nil, nil
-	}
-
-	for _, gsi := range t.gsis {
-		gsi.DeleteItem(ctx, params, optFns...)
-	}
-
-	out := &dynamodb.DeleteItemOutput{}
-	if params.ReturnValues == types.ReturnValueAllOld {
-		out.Attributes = old.value
-	}
-	return out, nil
-}
-
-func (s *mockStore) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	table, err := s.getTable(params.TableName)
+	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
 	if err != nil {
-		return nil, err
-	}
-	return table.GetItem(ctx, params, optFns...)
-}
-
-func (t *mockTable) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	if params == nil {
-		return nil, fmt.Errorf("params is required")
-	}
-	if params.Key == nil {
-		return nil, fmt.Errorf("key is required")
+		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	pk, err := t.extractPrimaryKey(params.Key)
+	key, err := schema.encoder.EncodeKey(pk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode key: %w", err)
 	}
 
-	store := t.getStore(pk.Values.PartitionKey)
+	var item map[string]types.AttributeValue
+	err = s.db.View(func(txn *badger.Txn) error {
+		badgerItem, err := txn.Get(key)
+		if err == badger.ErrKeyNotFound {
+			return errNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return badgerItem.Value(func(val []byte) error {
+			item, err = DeserializeItem(val)
+			return err
+		})
+	})
 
-	doc, found := store.Get(&document{pk, nil})
-	if !found {
+	if err == errNotFound {
 		return &dynamodb.GetItemOutput{}, errNotFound
 	}
-	return &dynamodb.GetItemOutput{Item: doc.value}, nil
-}
-
-func (s *mockStore) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
-	table, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
-	return table.PutItem(ctx, params, optFns...)
+
+	// TODO: Handle ProjectionExpression
+	return &dynamodb.GetItemOutput{Item: item}, nil
 }
 
-func (t *mockTable) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+// PutItem creates or replaces an item.
+func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	if params == nil {
 		return nil, fmt.Errorf("params is required")
 	}
 	if params.Item == nil {
 		return nil, fmt.Errorf("item is required")
 	}
-	pk, err := t.extractPrimaryKey(params.Item)
+
+	schema, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	store := t.getStore(pk.Values.PartitionKey)
-	// todo make concurrency safe - make topic queues
-	doc, found := store.Get(&document{pk, nil})
-
-	// only validate if document is found
-	if found && params.ConditionExpression != nil && !t.definition.IsGSI { // no need to do validation again for gsi, main table does it
-		input := writeconditions.EvalInput{
-			ExpressionValues: params.ExpressionAttributeValues,
-			ExpressionNames:  params.ExpressionAttributeNames,
-		}
-		valid, err := writeconditions.Eval(*params.ConditionExpression, input, doc.value)
-		if err != nil {
-			return nil, err
-		}
-		if !valid {
-			return nil, fmt.Errorf("condition failed: %v %w", valid, err)
-		}
-	}
-	old, _ := store.ReplaceOrInsert(&document{pk, params.Item})
-
-	if t.definition.IsGSI { // if it's a GSI we can return early here.
-		return nil, nil
+	pk, err := schema.definition.ExtractPrimaryKey(params.Item)
+	if err != nil {
+		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	// if gsi key attribute is changed, we need to delete the item from the gsi
-	// if gsi key attribute is present, we need to Put the item to the gsi
-	for _, gsi := range t.gsis {
-		newPk, hasNewPk := params.Item[gsi.definition.KeyDefinitions.PartitionKey.Name]
-		if hasNewPk { // Always put item if PK is present.
-			if _, err := gsi.PutItem(ctx, params, optFns...); err != nil {
-				return nil, fmt.Errorf("put to gsi: %w", err)
+	key, err := schema.encoder.EncodeKey(pk)
+	if err != nil {
+		return nil, fmt.Errorf("encode key: %w", err)
+	}
+
+	itemBytes, err := SerializeItem(params.Item)
+	if err != nil {
+		return nil, fmt.Errorf("serialize item: %w", err)
+	}
+
+	var oldItem map[string]types.AttributeValue
+
+	err = s.db.Update(func(txn *badger.Txn) error {
+		// Check for existing item (for condition expression and return values)
+		existingItem, err := txn.Get(key)
+		if err != nil && err != badger.ErrKeyNotFound {
+			return err
+		}
+
+		if err != badger.ErrKeyNotFound {
+			// Item exists - check condition expression
+			if err := existingItem.Value(func(val []byte) error {
+				oldItem, err = DeserializeItem(val)
+				return err
+			}); err != nil {
+				return err
 			}
-		}
-		if old == nil {
-			continue
-		}
-		var newSk, oldSk types.AttributeValue
-		if gsi.definition.KeyDefinitions.SortKey.Name != "" {
-			newSk = params.Item[gsi.definition.KeyDefinitions.SortKey.Name]
-			oldSk = old.value[gsi.definition.KeyDefinitions.SortKey.Name]
-		}
-		oldPk := old.value[gsi.definition.KeyDefinitions.PartitionKey.Name]
-		// todo test
-		if newPk != oldPk || newSk != oldSk { // GSI primary key changed or deleted, delete old document.
-			oldKey, err := gsi.extractPrimaryKey(old.value)
+
+			// Evaluate condition expression
+			if params.ConditionExpression != nil {
+				input := writeconditions.EvalInput{
+					ExpressionValues: params.ExpressionAttributeValues,
+					ExpressionNames:  params.ExpressionAttributeNames,
+				}
+				valid, err := writeconditions.Eval(*params.ConditionExpression, input, oldItem)
+				if err != nil {
+					return fmt.Errorf("evaluate condition: %w", err)
+				}
+				if !valid {
+					return &types.ConditionalCheckFailedException{
+						Message: ptrStr("The conditional request failed"),
+					}
+				}
+			}
+		} else if params.ConditionExpression != nil {
+			// Item doesn't exist - evaluate condition against empty document
+			input := writeconditions.EvalInput{
+				ExpressionValues: params.ExpressionAttributeValues,
+				ExpressionNames:  params.ExpressionAttributeNames,
+			}
+			valid, err := writeconditions.Eval(*params.ConditionExpression, input, nil)
 			if err != nil {
-				return nil, err
+				return fmt.Errorf("evaluate condition: %w", err)
 			}
-			// todo: any conditions needed here?
-			if _, err := gsi.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: params.TableName, Key: oldKey.DDB()}, optFns...); err != nil {
-				return nil, fmt.Errorf("delete from gsi: %w", err)
+			if !valid {
+				return &types.ConditionalCheckFailedException{
+					Message: ptrStr("The conditional request failed"),
+				}
 			}
 		}
+
+		// Write the new item to main table
+		if err := txn.Set(key, itemBytes); err != nil {
+			return err
+		}
+
+		// Handle GSI updates
+		for _, gsi := range schema.gsis {
+			if err := s.updateGSI(txn, gsi, params.Item, oldItem); err != nil {
+				return fmt.Errorf("update GSI %s: %w", gsi.definition.Name, err)
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	out := &dynamodb.PutItemOutput{}
-	if params.ReturnValues == types.ReturnValueAllOld {
-		out.Attributes = old.value
+	if params.ReturnValues == types.ReturnValueAllOld && oldItem != nil {
+		out.Attributes = oldItem
 	}
 	return out, nil
 }
 
-func (s *mockStore) TransactGetItems(ctx context.Context, params *dynamodb.TransactGetItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactGetItemsOutput, error) {
+// updateGSI handles GSI maintenance during PutItem.
+func (s *Store) updateGSI(txn *badger.Txn, gsi *tableSchema, newItem, oldItem map[string]types.AttributeValue) error {
+	pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
+	skAttr := gsi.definition.KeyDefinitions.SortKey.Name
+
+	// Check if new item has GSI key attributes
+	newPK, hasNewPK := newItem[pkAttr]
+	var newSK types.AttributeValue
+	if skAttr != "" {
+		newSK = newItem[skAttr]
+	}
+
+	// Delete old GSI entry if keys changed
+	if oldItem != nil {
+		oldPK, hadOldPK := oldItem[pkAttr]
+		var oldSK types.AttributeValue
+		if skAttr != "" {
+			oldSK = oldItem[skAttr]
+		}
+
+		if hadOldPK {
+			// Check if GSI key changed
+			keysChanged := !attributeValuesEqual(newPK, oldPK) || !attributeValuesEqual(newSK, oldSK)
+			if keysChanged || !hasNewPK {
+				// Delete old entry
+				oldGSIPK, err := gsi.definition.ExtractPrimaryKey(oldItem)
+				if err == nil { // Ignore errors - old item might not have had complete GSI key
+					oldKey, err := gsi.encoder.EncodeKey(oldGSIPK)
+					if err == nil {
+						txn.Delete(oldKey) // Ignore delete errors
+					}
+				}
+			}
+		}
+	}
+
+	// Insert new GSI entry if key attributes are present
+	if hasNewPK {
+		// For GSI with sort key, both must be present
+		if skAttr != "" && newSK == nil {
+			return nil // Skip - incomplete GSI key
+		}
+
+		gsiPK, err := gsi.definition.ExtractPrimaryKey(newItem)
+		if err != nil {
+			return nil // Skip - can't extract key (e.g., wrong type)
+		}
+
+		gsiKey, err := gsi.encoder.EncodeKey(gsiPK)
+		if err != nil {
+			return fmt.Errorf("encode GSI key: %w", err)
+		}
+
+		// GSIs store the full item
+		itemBytes, err := SerializeItem(newItem)
+		if err != nil {
+			return fmt.Errorf("serialize item for GSI: %w", err)
+		}
+
+		if err := txn.Set(gsiKey, itemBytes); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteItem removes an item by its primary key.
+func (s *Store) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.Key == nil {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	schema, err := s.getTable(params.TableName)
+	if err != nil {
+		return nil, err
+	}
+
+	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
+	if err != nil {
+		return nil, fmt.Errorf("extract primary key: %w", err)
+	}
+
+	key, err := schema.encoder.EncodeKey(pk)
+	if err != nil {
+		return nil, fmt.Errorf("encode key: %w", err)
+	}
+
+	var oldItem map[string]types.AttributeValue
+
+	err = s.db.Update(func(txn *badger.Txn) error {
+		// Get existing item for return values and GSI cleanup
+		existingItem, err := txn.Get(key)
+		if err == badger.ErrKeyNotFound {
+			return nil // Nothing to delete
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := existingItem.Value(func(val []byte) error {
+			oldItem, err = DeserializeItem(val)
+			return err
+		}); err != nil {
+			return err
+		}
+
+		// Evaluate condition expression
+		if params.ConditionExpression != nil {
+			input := writeconditions.EvalInput{
+				ExpressionValues: params.ExpressionAttributeValues,
+				ExpressionNames:  params.ExpressionAttributeNames,
+			}
+			valid, err := writeconditions.Eval(*params.ConditionExpression, input, oldItem)
+			if err != nil {
+				return fmt.Errorf("evaluate condition: %w", err)
+			}
+			if !valid {
+				return &types.ConditionalCheckFailedException{
+					Message: ptrStr("The conditional request failed"),
+				}
+			}
+		}
+
+		// Delete from main table
+		if err := txn.Delete(key); err != nil {
+			return err
+		}
+
+		// Delete from GSIs
+		for _, gsi := range schema.gsis {
+			pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
+			if _, hasPK := oldItem[pkAttr]; hasPK {
+				gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem)
+				if err == nil {
+					gsiKey, err := gsi.encoder.EncodeKey(gsiPK)
+					if err == nil {
+						txn.Delete(gsiKey) // Ignore errors
+					}
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	out := &dynamodb.DeleteItemOutput{}
+	if params.ReturnValues == types.ReturnValueAllOld && oldItem != nil {
+		out.Attributes = oldItem
+	}
+	return out, nil
+}
+
+// Query retrieves items matching a key condition expression.
+func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.KeyConditionExpression == nil {
+		return nil, fmt.Errorf("key condition expression is required")
+	}
+
+	schema, err := s.getTableAndGSI(params.TableName, params.IndexName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the key condition expression
+	keyCond, err := keyconditions.Parse(*params.KeyConditionExpression, keyconditions.KeyConditionParams{
+		ExpressionAttributeNames:  params.ExpressionAttributeNames,
+		ExpressionAttributeValues: params.ExpressionAttributeValues,
+		TableKeys:                 schema.definition.KeyDefinitions,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("parse key condition: %w", err)
+	}
+
+	// Get the partition key value
+	pkValue := keyCond.PartitionKeyCond.EqualsValue.GetValue()
+
+	// Build the prefix for this partition
+	prefix, err := schema.encoder.EncodePartitionKeyPrefix(pkValue.Value)
+	if err != nil {
+		return nil, fmt.Errorf("encode partition key prefix: %w", err)
+	}
+
+	var items []map[string]types.AttributeValue
+	var lastKey map[string]types.AttributeValue
+
+	limit := 0
+	if params.Limit != nil {
+		limit = int(*params.Limit)
+	}
+
+	scanForward := params.ScanIndexForward == nil || *params.ScanIndexForward
+
+	err = s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Reverse = !scanForward
+		opts.Prefix = prefix
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		// Determine start position
+		startKey := prefix
+		if params.ExclusiveStartKey != nil {
+			startPK, err := schema.definition.ExtractPrimaryKey(params.ExclusiveStartKey)
+			if err != nil {
+				return fmt.Errorf("extract start key: %w", err)
+			}
+			startKey, err = schema.encoder.EncodeKey(startPK)
+			if err != nil {
+				return fmt.Errorf("encode start key: %w", err)
+			}
+		}
+
+		if !scanForward {
+			// For reverse iteration, seek to end of prefix range
+			endPrefix := incrementBytes(prefix)
+			if params.ExclusiveStartKey != nil {
+				it.Seek(startKey)
+			} else {
+				it.Seek(endPrefix)
+			}
+		} else {
+			it.Seek(startKey)
+			// Skip the start key if it's an exclusive start
+			if params.ExclusiveStartKey != nil && it.Valid() {
+				it.Next()
+			}
+		}
+
+		for it.Valid() {
+			if !bytes.HasPrefix(it.Item().Key(), prefix) {
+				break
+			}
+
+			// Apply sort key condition if present
+			if keyCond.SortKeyCond != nil {
+				matches, err := s.matchesSortKeyCondition(schema, it.Item().Key(), prefix, keyCond.SortKeyCond)
+				if err != nil {
+					return err
+				}
+				if !matches {
+					// For range conditions, we might be able to stop early
+					if s.canStopEarly(keyCond.SortKeyCond, scanForward) {
+						break
+					}
+					it.Next()
+					continue
+				}
+			}
+
+			var item map[string]types.AttributeValue
+			if err := it.Item().Value(func(val []byte) error {
+				var err error
+				item, err = DeserializeItem(val)
+				return err
+			}); err != nil {
+				return err
+			}
+
+			// Apply filter expression if present
+			if params.FilterExpression != nil {
+				input := writeconditions.EvalInput{
+					ExpressionValues: params.ExpressionAttributeValues,
+					ExpressionNames:  params.ExpressionAttributeNames,
+				}
+				matches, err := writeconditions.Eval(*params.FilterExpression, input, item)
+				if err != nil {
+					return fmt.Errorf("evaluate filter: %w", err)
+				}
+				if !matches {
+					it.Next()
+					continue
+				}
+			}
+
+			items = append(items, item)
+
+			if limit > 0 && len(items) >= limit {
+				// Set LastEvaluatedKey for pagination
+				lastKey = extractKeyAttributes(item, schema.definition.KeyDefinitions)
+				break
+			}
+
+			it.Next()
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	count := int32(len(items))
+	return &dynamodb.QueryOutput{
+		Items:            items,
+		Count:            count,
+		ScannedCount:     count, // In real DDB, this might differ due to filters
+		LastEvaluatedKey: lastKey,
+	}, nil
+}
+
+// matchesSortKeyCondition checks if a key matches the sort key condition.
+func (s *Store) matchesSortKeyCondition(schema *tableSchema, fullKey, prefix []byte, cond *ast.SortKeyCondition) (bool, error) {
+	// Extract the sort key portion from the full key
+	skBytes := fullKey[len(prefix):]
+
+	// Decode the sort key value
+	skValue, err := s.decodeSortKeyValue(schema, skBytes)
+	if err != nil {
+		return false, err
+	}
+
+	switch {
+	case cond.Compare != nil:
+		condValue := cond.Compare.Value.GetValue()
+		return s.compareKeyValues(skValue, cond.Compare.Comp, &condValue), nil
+
+	case cond.Between != nil:
+		lower := cond.Between.Lower.GetValue()
+		upper := cond.Between.Upper.GetValue()
+		return skValue.GreaterThanOrEqual(&lower) && skValue.LessThanOrEqual(&upper), nil
+
+	case cond.BeginsWith != nil:
+		prefixVal := cond.BeginsWith.Prefix.GetValue()
+		skStr, ok := skValue.Value.(string)
+		if !ok {
+			return false, fmt.Errorf("begins_with requires string sort key")
+		}
+		prefixStr, ok := prefixVal.Value.(string)
+		if !ok {
+			return false, fmt.Errorf("begins_with prefix must be string")
+		}
+		return strings.HasPrefix(skStr, prefixStr), nil
+	}
+
+	return true, nil
+}
+
+func (s *Store) decodeSortKeyValue(schema *tableSchema, skBytes []byte) (*ast.KeyValue, error) {
+	if len(skBytes) == 0 {
+		return &ast.KeyValue{}, nil
+	}
+
+	keyType := skBytes[0]
+	valueBytes := skBytes[1:]
+
+	switch keyType {
+	case keyTypeString:
+		return &ast.KeyValue{
+			Value: string(unescapeBytes(valueBytes)),
+			Type:  ast.STRING,
+		}, nil
+	case keyTypeNumber:
+		numStr, err := decodeNumber(valueBytes) // pass just the encoded number, not type byte
+		if err != nil {
+			return nil, err
+		}
+		return &ast.KeyValue{
+			Value: numStr,
+			Type:  ast.NUMBER,
+		}, nil
+	case keyTypeBinary:
+		return &ast.KeyValue{
+			Value: unescapeBytes(valueBytes),
+			Type:  ast.BINARY,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown key type: %c", keyType)
+	}
+}
+
+func (s *Store) compareKeyValues(left *ast.KeyValue, comp ast.KeyComparator, right *ast.KeyValue) bool {
+	switch comp {
+	case ast.Equal:
+		return left.Equal(right)
+	case ast.LessThan:
+		return left.LessThan(right)
+	case ast.LessOrEqual:
+		return left.LessThanOrEqual(right)
+	case ast.GreaterThan:
+		return left.GreaterThan(right)
+	case ast.GreaterOrEqual:
+		return left.GreaterThanOrEqual(right)
+	default:
+		return false
+	}
+}
+
+func (s *Store) canStopEarly(cond *ast.SortKeyCondition, scanForward bool) bool {
+	// For certain conditions, we can stop iterating early
+	if cond.Compare != nil {
+		switch cond.Compare.Comp {
+		case ast.LessThan, ast.LessOrEqual:
+			return scanForward // Can stop when we exceed the upper bound
+		case ast.GreaterThan, ast.GreaterOrEqual:
+			return !scanForward // Can stop in reverse when below lower bound
+		}
+	}
+	return false
+}
+
+// Scan retrieves all items in a table, optionally with a filter.
+func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+
+	schema, err := s.getTableAndGSI(params.TableName, params.IndexName)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []map[string]types.AttributeValue
+	var lastKey map[string]types.AttributeValue
+
+	limit := 0
+	if params.Limit != nil {
+		limit = int(*params.Limit)
+	}
+
+	prefix := schema.encoder.TablePrefix()
+
+	err = s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		// Handle pagination
+		if params.ExclusiveStartKey != nil {
+			startPK, err := schema.definition.ExtractPrimaryKey(params.ExclusiveStartKey)
+			if err != nil {
+				return fmt.Errorf("extract start key: %w", err)
+			}
+			startKey, err := schema.encoder.EncodeKey(startPK)
+			if err != nil {
+				return fmt.Errorf("encode start key: %w", err)
+			}
+			it.Seek(startKey)
+			if it.Valid() {
+				it.Next() // Skip the start key (exclusive)
+			}
+		} else {
+			it.Seek(prefix)
+		}
+
+		for it.Valid() {
+			if !bytes.HasPrefix(it.Item().Key(), prefix) {
+				break
+			}
+
+			var item map[string]types.AttributeValue
+			if err := it.Item().Value(func(val []byte) error {
+				var err error
+				item, err = DeserializeItem(val)
+				return err
+			}); err != nil {
+				return err
+			}
+
+			// Apply filter expression if present
+			if params.FilterExpression != nil {
+				input := writeconditions.EvalInput{
+					ExpressionValues: params.ExpressionAttributeValues,
+					ExpressionNames:  params.ExpressionAttributeNames,
+				}
+				matches, err := writeconditions.Eval(*params.FilterExpression, input, item)
+				if err != nil {
+					return fmt.Errorf("evaluate filter: %w", err)
+				}
+				if !matches {
+					it.Next()
+					continue
+				}
+			}
+
+			items = append(items, item)
+
+			if limit > 0 && len(items) >= limit {
+				lastKey = extractKeyAttributes(item, schema.definition.KeyDefinitions)
+				break
+			}
+
+			it.Next()
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	count := int32(len(items))
+	return &dynamodb.ScanOutput{
+		Items:            items,
+		Count:            count,
+		ScannedCount:     count,
+		LastEvaluatedKey: lastKey,
+	}, nil
+}
+
+// UpdateItem updates an existing item or creates a new one.
+// Note: This is a simplified implementation that doesn't support UpdateExpression.
+// It performs a read-modify-write operation.
+func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.Key == nil {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	// TODO: Implement UpdateExpression parsing and evaluation
+	// For now, this is a stub that returns an error
+	if params.UpdateExpression != nil {
+		return nil, fmt.Errorf("UpdateExpression not yet implemented")
+	}
+
+	// Without UpdateExpression, there's nothing to update
+	return nil, fmt.Errorf("UpdateExpression is required")
+}
+
+// BatchGetItem retrieves multiple items by their primary keys.
+func (s *Store) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.RequestItems == nil {
+		return nil, fmt.Errorf("request items is required")
+	}
+
+	response := &dynamodb.BatchGetItemOutput{
+		Responses: make(map[string][]map[string]types.AttributeValue),
+		// UnprocessedKeys is left nil - in a real DynamoDB this would contain
+		// keys that couldn't be processed due to throughput limits. Since this
+		// is a local store without throughput constraints, all keys are always processed.
+		// todo: Simulate failures & unprocessedkeys
+	}
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		for tableName, keysAndAttrs := range params.RequestItems {
+			schema, err := s.getTable(&tableName)
+			if err != nil {
+				return err
+			}
+
+			for _, keyAttrs := range keysAndAttrs.Keys {
+				pk, err := schema.definition.ExtractPrimaryKey(keyAttrs)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				badgerItem, err := txn.Get(key)
+				if err == badger.ErrKeyNotFound {
+					continue // Item not found, skip
+				}
+				if err != nil {
+					return err
+				}
+
+				var item map[string]types.AttributeValue
+				if err := badgerItem.Value(func(val []byte) error {
+					item, err = DeserializeItem(val)
+					return err
+				}); err != nil {
+					return err
+				}
+
+				// TODO: Handle ProjectionExpression
+				response.Responses[tableName] = append(response.Responses[tableName], item)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+// BatchWriteItem performs multiple put/delete operations.
+func (s *Store) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.RequestItems == nil {
+		return nil, fmt.Errorf("request items is required")
+	}
+
+	unprocessed := make(map[string][]types.WriteRequest)
+
+	err := s.db.Update(func(txn *badger.Txn) error {
+		for tableName, writeRequests := range params.RequestItems {
+			schema, err := s.getTable(&tableName)
+			if err != nil {
+				return err
+			}
+
+			for _, req := range writeRequests {
+				switch {
+				case req.PutRequest != nil:
+					pk, err := schema.definition.ExtractPrimaryKey(req.PutRequest.Item)
+					if err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					key, err := schema.encoder.EncodeKey(pk)
+					if err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					itemBytes, err := SerializeItem(req.PutRequest.Item)
+					if err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					// Get old item for GSI maintenance
+					var oldItem map[string]types.AttributeValue
+					if badgerItem, err := txn.Get(key); err == nil {
+						badgerItem.Value(func(val []byte) error {
+							oldItem, _ = DeserializeItem(val)
+							return nil
+						})
+					}
+
+					if err := txn.Set(key, itemBytes); err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					// Update GSIs
+					for _, gsi := range schema.gsis {
+						s.updateGSI(txn, gsi, req.PutRequest.Item, oldItem)
+					}
+
+				case req.DeleteRequest != nil:
+					pk, err := schema.definition.ExtractPrimaryKey(req.DeleteRequest.Key)
+					if err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					key, err := schema.encoder.EncodeKey(pk)
+					if err != nil {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					// Get old item for GSI cleanup
+					var oldItem map[string]types.AttributeValue
+					if badgerItem, err := txn.Get(key); err == nil {
+						badgerItem.Value(func(val []byte) error {
+							oldItem, _ = DeserializeItem(val)
+							return nil
+						})
+					}
+
+					if err := txn.Delete(key); err != nil && err != badger.ErrKeyNotFound {
+						unprocessed[tableName] = append(unprocessed[tableName], req)
+						continue
+					}
+
+					// Delete from GSIs
+					if oldItem != nil {
+						for _, gsi := range schema.gsis {
+							pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
+							if _, hasPK := oldItem[pkAttr]; hasPK {
+								if gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem); err == nil {
+									if gsiKey, err := gsi.encoder.EncodeKey(gsiPK); err == nil {
+										txn.Delete(gsiKey)
+									}
+								}
+							}
+						}
+					}
+
+				default:
+					return fmt.Errorf("empty write request")
+				}
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &dynamodb.BatchWriteItemOutput{
+		UnprocessedItems: unprocessed,
+	}, nil
+}
+
+// TransactGetItems retrieves multiple items atomically.
+func (s *Store) TransactGetItems(ctx context.Context, params *dynamodb.TransactGetItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactGetItemsOutput, error) {
 	if params == nil {
 		return nil, fmt.Errorf("params is required")
 	}
 	if params.TransactItems == nil {
 		return nil, fmt.Errorf("transact items is required")
 	}
+
 	response := &dynamodb.TransactGetItemsOutput{
-		Responses:        make([]types.ItemResponse, 0),
-		ConsumedCapacity: make([]types.ConsumedCapacity, 0),
+		Responses: make([]types.ItemResponse, 0, len(params.TransactItems)),
 	}
-	for _, item := range params.TransactItems {
-		if item.Get == nil {
-			return nil, fmt.Errorf("empty transact get item request")
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		for _, item := range params.TransactItems {
+			if item.Get == nil {
+				return fmt.Errorf("empty transact get item request")
+			}
+
+			schema, err := s.getTable(item.Get.TableName)
+			if err != nil {
+				return err
+			}
+
+			pk, err := schema.definition.ExtractPrimaryKey(item.Get.Key)
+			if err != nil {
+				return err
+			}
+
+			key, err := schema.encoder.EncodeKey(pk)
+			if err != nil {
+				return err
+			}
+
+			badgerItem, err := txn.Get(key)
+			if err == badger.ErrKeyNotFound {
+				response.Responses = append(response.Responses, types.ItemResponse{})
+				continue
+			}
+			if err != nil {
+				return err
+			}
+
+			var docItem map[string]types.AttributeValue
+			if err := badgerItem.Value(func(val []byte) error {
+				docItem, err = DeserializeItem(val)
+				return err
+			}); err != nil {
+				return err
+			}
+
+			// TODO: Handle ProjectionExpression
+			response.Responses = append(response.Responses, types.ItemResponse{Item: docItem})
 		}
-		table, err := s.getTable(item.Get.TableName)
-		if err != nil {
-			return nil, err
-		}
-		pk, err := table.extractPrimaryKey(item.Get.Key)
-		if err != nil {
-			return nil, err
-		}
-		store := table.getStore(pk.Values.PartitionKey)
-		doc, found := store.Get(&document{pk, nil})
-		if found {
-			response.Responses = append(response.Responses, types.ItemResponse{
-				Item: doc.value,
-			})
-		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
+
 	return response, nil
 }
 
-func (s *mockStore) TransactWriteItems(ctx context.Context, params *dynamodb.TransactWriteItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
-	return nil, nil
+// TransactWriteItems performs multiple write operations atomically.
+func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.TransactWriteItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params is required")
+	}
+	if params.TransactItems == nil {
+		return nil, fmt.Errorf("transact items is required")
+	}
+
+	err := s.db.Update(func(txn *badger.Txn) error {
+		// First pass: validate all conditions
+		for i, item := range params.TransactItems {
+			switch {
+			case item.Put != nil:
+				if item.Put.ConditionExpression != nil {
+					schema, err := s.getTable(item.Put.TableName)
+					if err != nil {
+						return err
+					}
+
+					pk, err := schema.definition.ExtractPrimaryKey(item.Put.Item)
+					if err != nil {
+						return err
+					}
+
+					key, err := schema.encoder.EncodeKey(pk)
+					if err != nil {
+						return err
+					}
+
+					var existingItem map[string]types.AttributeValue
+					if badgerItem, err := txn.Get(key); err == nil {
+						badgerItem.Value(func(val []byte) error {
+							existingItem, _ = DeserializeItem(val)
+							return nil
+						})
+					}
+
+					input := writeconditions.EvalInput{
+						ExpressionValues: item.Put.ExpressionAttributeValues,
+						ExpressionNames:  item.Put.ExpressionAttributeNames,
+					}
+					valid, err := writeconditions.Eval(*item.Put.ConditionExpression, input, existingItem)
+					if err != nil {
+						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
+					}
+					if !valid {
+						return &types.TransactionCanceledException{
+							Message: ptrStr(fmt.Sprintf("Transaction cancelled, condition check failed for item %d", i)),
+						}
+					}
+				}
+
+			case item.Delete != nil:
+				if item.Delete.ConditionExpression != nil {
+					schema, err := s.getTable(item.Delete.TableName)
+					if err != nil {
+						return err
+					}
+
+					pk, err := schema.definition.ExtractPrimaryKey(item.Delete.Key)
+					if err != nil {
+						return err
+					}
+
+					key, err := schema.encoder.EncodeKey(pk)
+					if err != nil {
+						return err
+					}
+
+					var existingItem map[string]types.AttributeValue
+					if badgerItem, err := txn.Get(key); err == nil {
+						badgerItem.Value(func(val []byte) error {
+							existingItem, _ = DeserializeItem(val)
+							return nil
+						})
+					}
+
+					input := writeconditions.EvalInput{
+						ExpressionValues: item.Delete.ExpressionAttributeValues,
+						ExpressionNames:  item.Delete.ExpressionAttributeNames,
+					}
+					valid, err := writeconditions.Eval(*item.Delete.ConditionExpression, input, existingItem)
+					if err != nil {
+						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
+					}
+					if !valid {
+						return &types.TransactionCanceledException{
+							Message: ptrStr(fmt.Sprintf("Transaction cancelled, condition check failed for item %d", i)),
+						}
+					}
+				}
+
+			case item.ConditionCheck != nil:
+				schema, err := s.getTable(item.ConditionCheck.TableName)
+				if err != nil {
+					return err
+				}
+
+				pk, err := schema.definition.ExtractPrimaryKey(item.ConditionCheck.Key)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				var existingItem map[string]types.AttributeValue
+				if badgerItem, err := txn.Get(key); err == nil {
+					badgerItem.Value(func(val []byte) error {
+						existingItem, _ = DeserializeItem(val)
+						return nil
+					})
+				}
+
+				input := writeconditions.EvalInput{
+					ExpressionValues: item.ConditionCheck.ExpressionAttributeValues,
+					ExpressionNames:  item.ConditionCheck.ExpressionAttributeNames,
+				}
+				valid, err := writeconditions.Eval(*item.ConditionCheck.ConditionExpression, input, existingItem)
+				if err != nil {
+					return fmt.Errorf("item %d: evaluate condition: %w", i, err)
+				}
+				if !valid {
+					return &types.TransactionCanceledException{
+						Message: ptrStr(fmt.Sprintf("Transaction cancelled, condition check failed for item %d", i)),
+					}
+				}
+
+			case item.Update != nil:
+				// TODO: Implement UpdateExpression support
+				return fmt.Errorf("item %d: Update in transactions not yet implemented", i)
+			}
+		}
+
+		// Second pass: perform all writes
+		for _, item := range params.TransactItems {
+			switch {
+			case item.Put != nil:
+				schema, err := s.getTable(item.Put.TableName)
+				if err != nil {
+					return err
+				}
+
+				pk, err := schema.definition.ExtractPrimaryKey(item.Put.Item)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				// Get old item for GSI maintenance
+				var oldItem map[string]types.AttributeValue
+				if badgerItem, err := txn.Get(key); err == nil {
+					badgerItem.Value(func(val []byte) error {
+						oldItem, _ = DeserializeItem(val)
+						return nil
+					})
+				}
+
+				itemBytes, err := SerializeItem(item.Put.Item)
+				if err != nil {
+					return err
+				}
+
+				if err := txn.Set(key, itemBytes); err != nil {
+					return err
+				}
+
+				// Update GSIs
+				for _, gsi := range schema.gsis {
+					if err := s.updateGSI(txn, gsi, item.Put.Item, oldItem); err != nil {
+						return err
+					}
+				}
+
+			case item.Delete != nil:
+				schema, err := s.getTable(item.Delete.TableName)
+				if err != nil {
+					return err
+				}
+
+				pk, err := schema.definition.ExtractPrimaryKey(item.Delete.Key)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				// Get old item for GSI cleanup
+				var oldItem map[string]types.AttributeValue
+				if badgerItem, err := txn.Get(key); err == nil {
+					badgerItem.Value(func(val []byte) error {
+						oldItem, _ = DeserializeItem(val)
+						return nil
+					})
+				}
+
+				if err := txn.Delete(key); err != nil && err != badger.ErrKeyNotFound {
+					return err
+				}
+
+				// Delete from GSIs
+				if oldItem != nil {
+					for _, gsi := range schema.gsis {
+						pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
+						if _, hasPK := oldItem[pkAttr]; hasPK {
+							if gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem); err == nil {
+								if gsiKey, err := gsi.encoder.EncodeKey(gsiPK); err == nil {
+									txn.Delete(gsiKey)
+								}
+							}
+						}
+					}
+				}
+
+			case item.ConditionCheck != nil:
+				// Already validated, nothing to write
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &dynamodb.TransactWriteItemsOutput{}, nil
 }
 
-func (s *mockStore) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
-	return nil, nil
+// Helper functions
+
+func ptrStr(s string) *string {
+	return &s
 }
 
-func (s *mockStore) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error) {
-	return nil, nil
+func attributeValuesEqual(a, b types.AttributeValue) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	switch av := a.(type) {
+	case *types.AttributeValueMemberS:
+		if bv, ok := b.(*types.AttributeValueMemberS); ok {
+			return av.Value == bv.Value
+		}
+	case *types.AttributeValueMemberN:
+		if bv, ok := b.(*types.AttributeValueMemberN); ok {
+			return av.Value == bv.Value
+		}
+	case *types.AttributeValueMemberB:
+		if bv, ok := b.(*types.AttributeValueMemberB); ok {
+			return bytes.Equal(av.Value, bv.Value)
+		}
+	}
+	return false
 }
 
-func (s *mockStore) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
-	return nil, nil
+func extractKeyAttributes(item map[string]types.AttributeValue, keyDef table.PrimaryKeyDefinition) map[string]types.AttributeValue {
+	result := make(map[string]types.AttributeValue)
+	if pk, ok := item[keyDef.PartitionKey.Name]; ok {
+		result[keyDef.PartitionKey.Name] = pk
+	}
+	if keyDef.SortKey.Name != "" {
+		if sk, ok := item[keyDef.SortKey.Name]; ok {
+			result[keyDef.SortKey.Name] = sk
+		}
+	}
+	return result
 }
 
-// All methods of dynamodb.Client.
-// func (s *mockStore) BatchExecuteStatement(ctx context.Context, params *dynamodb.BatchExecuteStatementInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchExecuteStatementOutput, error)
-// func (s *mockStore) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error)
-// func (s *mockStore) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
-// func (s *mockStore) CreateBackup(ctx context.Context, params *dynamodb.CreateBackupInput, optFns ...func(*dynamodb.Options)) (*dynamodb.CreateBackupOutput, error)
-// func (s *mockStore) CreateGlobalTable(ctx context.Context, params *dynamodb.CreateGlobalTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.CreateGlobalTableOutput, error)
-// func (s *mockStore) CreateTable(ctx context.Context, params *dynamodb.CreateTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error)
-// func (s *mockStore) DeleteBackup(ctx context.Context, params *dynamodb.DeleteBackupInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteBackupOutput, error)
-// func (s *mockStore) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error)
-// func (s *mockStore) DeleteResourcePolicy(ctx context.Context, params *dynamodb.DeleteResourcePolicyInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteResourcePolicyOutput, error)
-// func (s *mockStore) DeleteTable(ctx context.Context, params *dynamodb.DeleteTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error)
-// func (s *mockStore) DescribeBackup(ctx context.Context, params *dynamodb.DescribeBackupInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeBackupOutput, error)
-// func (s *mockStore) DescribeContinuousBackups(ctx context.Context, params *dynamodb.DescribeContinuousBackupsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeContinuousBackupsOutput, error)
-// func (s *mockStore) DescribeContributorInsights(ctx context.Context, params *dynamodb.DescribeContributorInsightsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeContributorInsightsOutput, error)
-// func (s *mockStore) DescribeEndpoints(ctx context.Context, params *dynamodb.DescribeEndpointsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeEndpointsOutput, error)
-// func (s *mockStore) DescribeExport(ctx context.Context, params *dynamodb.DescribeExportInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeExportOutput, error)
-// func (s *mockStore) DescribeGlobalTable(ctx context.Context, params *dynamodb.DescribeGlobalTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeGlobalTableOutput, error)
-// func (s *mockStore) DescribeGlobalTableSettings(ctx context.Context, params *dynamodb.DescribeGlobalTableSettingsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeGlobalTableSettingsOutput, error)
-// func (s *mockStore) DescribeImport(ctx context.Context, params *dynamodb.DescribeImportInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeImportOutput, error)
-// func (s *mockStore) DescribeKinesisStreamingDestination(ctx context.Context, params *dynamodb.DescribeKinesisStreamingDestinationInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeKinesisStreamingDestinationOutput, error)
-// func (s *mockStore) DescribeLimits(ctx context.Context, params *dynamodb.DescribeLimitsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeLimitsOutput, error)
-// func (s *mockStore) DescribeTable(ctx context.Context, params *dynamodb.DescribeTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
-// func (s *mockStore) DescribeTableReplicaAutoScaling(ctx context.Context, params *dynamodb.DescribeTableReplicaAutoScalingInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTableReplicaAutoScalingOutput, error)
-// func (s *mockStore) DescribeTimeToLive(ctx context.Context, params *dynamodb.DescribeTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DescribeTimeToLiveOutput, error)
-// func (s *mockStore) DisableKinesisStreamingDestination(ctx context.Context, params *dynamodb.DisableKinesisStreamingDestinationInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DisableKinesisStreamingDestinationOutput, error)
-// func (s *mockStore) EnableKinesisStreamingDestination(ctx context.Context, params *dynamodb.EnableKinesisStreamingDestinationInput, optFns ...func(*dynamodb.Options)) (*dynamodb.EnableKinesisStreamingDestinationOutput, error)
-// func (s *mockStore) ExecuteStatement(ctx context.Context, params *dynamodb.ExecuteStatementInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ExecuteStatementOutput, error)
-// func (s *mockStore) ExecuteTransaction(ctx context.Context, params *dynamodb.ExecuteTransactionInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ExecuteTransactionOutput, error)
-// func (s *mockStore) ExportTableToPointInTime(ctx context.Context, params *dynamodb.ExportTableToPointInTimeInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ExportTableToPointInTimeOutput, error)
-// func (s *mockStore) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
-// func (s *mockStore) GetResourcePolicy(ctx context.Context, params *dynamodb.GetResourcePolicyInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetResourcePolicyOutput, error)
-// func (s *mockStore) ImportTable(ctx context.Context, params *dynamodb.ImportTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ImportTableOutput, error)
-// func (s *mockStore) ListBackups(ctx context.Context, params *dynamodb.ListBackupsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListBackupsOutput, error)
-// func (s *mockStore) ListContributorInsights(ctx context.Context, params *dynamodb.ListContributorInsightsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListContributorInsightsOutput, error)
-// func (s *mockStore) ListExports(ctx context.Context, params *dynamodb.ListExportsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListExportsOutput, error)
-// func (s *mockStore) ListGlobalTables(ctx context.Context, params *dynamodb.ListGlobalTablesInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListGlobalTablesOutput, error)
-// func (s *mockStore) ListImports(ctx context.Context, params *dynamodb.ListImportsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListImportsOutput, error)
-// func (s *mockStore) ListTables(ctx context.Context, params *dynamodb.ListTablesInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListTablesOutput, error)
-// func (s *mockStore) ListTagsOfResource(ctx context.Context, params *dynamodb.ListTagsOfResourceInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ListTagsOfResourceOutput, error)
-// func (s *mockStore) Options() dynamodb.Options
-// func (s *mockStore) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
-// func (s *mockStore) PutResourcePolicy(ctx context.Context, params *dynamodb.PutResourcePolicyInput, optFns ...func(*dynamodb.Options)) (*dynamodb.PutResourcePolicyOutput, error)
-// func (s *mockStore) Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
-// func (s *mockStore) RestoreTableFromBackup(ctx context.Context, params *dynamodb.RestoreTableFromBackupInput, optFns ...func(*dynamodb.Options)) (*dynamodb.RestoreTableFromBackupOutput, error)
-// func (s *mockStore) RestoreTableToPointInTime(ctx context.Context, params *dynamodb.RestoreTableToPointInTimeInput, optFns ...func(*dynamodb.Options)) (*dynamodb.RestoreTableToPointInTimeOutput, error)
-// func (s *mockStore) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...func(*dynamodb.Options)) (*dynamodb.ScanOutput, error)
-// func (s *mockStore) TagResource(ctx context.Context, params *dynamodb.TagResourceInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TagResourceOutput, error)
-// func (s *mockStore) TransactGetItems(ctx context.Context, params *dynamodb.TransactGetItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactGetItemsOutput, error)
-// func (s *mockStore) TransactWriteItems(ctx context.Context, params *dynamodb.TransactWriteItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error)
-// func (s *mockStore) UntagResource(ctx context.Context, params *dynamodb.UntagResourceInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UntagResourceOutput, error)
-// func (s *mockStore) UpdateContinuousBackups(ctx context.Context, params *dynamodb.UpdateContinuousBackupsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateContinuousBackupsOutput, error)
-// func (s *mockStore) UpdateContributorInsights(ctx context.Context, params *dynamodb.UpdateContributorInsightsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateContributorInsightsOutput, error)
-// func (s *mockStore) UpdateGlobalTable(ctx context.Context, params *dynamodb.UpdateGlobalTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateGlobalTableOutput, error)
-// func (s *mockStore) UpdateGlobalTableSettings(ctx context.Context, params *dynamodb.UpdateGlobalTableSettingsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateGlobalTableSettingsOutput, error)
-// func (s *mockStore) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
-// func (s *mockStore) UpdateKinesisStreamingDestination(ctx context.Context, params *dynamodb.UpdateKinesisStreamingDestinationInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateKinesisStreamingDestinationOutput, error)
-// func (s *mockStore) UpdateTable(ctx context.Context, params *dynamodb.UpdateTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateTableOutput, error)
-// func (s *mockStore) UpdateTableReplicaAutoScaling(ctx context.Context, params *dynamodb.UpdateTableReplicaAutoScalingInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateTableReplicaAutoScalingOutput, error)
-// func (s *mockStore) UpdateTimeToLive(ctx context.Context, params *dynamodb.UpdateTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateTimeToLiveOutput, error)
+func incrementBytes(b []byte) []byte {
+	result := make([]byte, len(b))
+	copy(result, b)
+	for i := len(result) - 1; i >= 0; i-- {
+		if result[i] < 0xFF {
+			result[i]++
+			return result
+		}
+		result[i] = 0
+	}
+	// Overflow - append 0x00
+	return append(result, 0x00)
+}

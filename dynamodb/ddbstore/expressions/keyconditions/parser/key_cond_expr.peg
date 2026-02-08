@@ -80,7 +80,7 @@ EqualsConditionNoParens
 Identifier
   = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
         name := astutil.HeadTailString(head, tail)
-        return ast.RawName{name}, verifyIdentifierAgainstTable(name, c.paramsFromStore().TableKeys)
+        return ast.NewRawName(name), verifyIdentifierAgainstTable(name, c.paramsFromStore().TableKeys)
     }
   / ExpressionAttributeName
 

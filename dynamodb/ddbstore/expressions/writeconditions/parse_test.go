@@ -32,7 +32,7 @@ func TestEvalCondition(t *testing.T) {
 				"id": &types.AttributeValueMemberS{Value: "123"},
 			},
 			expected:  false,
-			shouldErr: true,
+			shouldErr: false, // attribute_exists returns false for missing attributes, not an error
 		},
 		{
 			name: "nested path",

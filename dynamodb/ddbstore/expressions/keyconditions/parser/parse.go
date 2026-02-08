@@ -27,7 +27,7 @@ func ParseExpr(expr string, params KeyConditionParserParams) (_ *ast.KeyConditio
 			err = fmt.Errorf("%v", r)
 		}
 	}()
-	v, err := Parse("keyConditionParser", []byte(expr), GlobalStore(globalStoreParamsKey, params))
+	v, err := Parse("keyConditionParser", []byte(expr), GlobalStore(globalStoreParamsKey, &params))
 	if err != nil {
 		return nil, err
 	}
