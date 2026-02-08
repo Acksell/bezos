@@ -1299,8 +1299,45 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 			case item.Update != nil:
-				// TODO: Implement UpdateExpression support
-				return fmt.Errorf("item %d: Update in transactions not yet implemented", i)
+				schema, err := s.getTable(item.Update.TableName)
+				if err != nil {
+					return err
+				}
+
+				pk, err := schema.definition.ExtractPrimaryKey(item.Update.Key)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				var existingItem map[string]types.AttributeValue
+				if badgerItem, err := txn.Get(key); err == nil {
+					badgerItem.Value(func(val []byte) error {
+						existingItem, _ = DeserializeItem(val)
+						return nil
+					})
+				}
+
+				// Evaluate condition expression if present
+				if item.Update.ConditionExpression != nil {
+					input := writeconditions.EvalInput{
+						ExpressionValues: item.Update.ExpressionAttributeValues,
+						ExpressionNames:  item.Update.ExpressionAttributeNames,
+					}
+					valid, err := writeconditions.Eval(*item.Update.ConditionExpression, input, existingItem)
+					if err != nil {
+						return fmt.Errorf("item %d: evaluate condition: %w", i, err)
+					}
+					if !valid {
+						return &types.TransactionCanceledException{
+							Message: ptrStr(fmt.Sprintf("Transaction cancelled, condition check failed for item %d", i)),
+						}
+					}
+				}
 			}
 		}
 
@@ -1393,6 +1430,78 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 
 			case item.ConditionCheck != nil:
 				// Already validated, nothing to write
+
+			case item.Update != nil:
+				schema, err := s.getTable(item.Update.TableName)
+				if err != nil {
+					return err
+				}
+
+				pk, err := schema.definition.ExtractPrimaryKey(item.Update.Key)
+				if err != nil {
+					return err
+				}
+
+				key, err := schema.encoder.EncodeKey(pk)
+				if err != nil {
+					return err
+				}
+
+				// Get existing item
+				var oldItem map[string]types.AttributeValue
+				if badgerItem, err := txn.Get(key); err == nil {
+					badgerItem.Value(func(val []byte) error {
+						oldItem, _ = DeserializeItem(val)
+						return nil
+					})
+				}
+
+				// Parse and apply the update expression
+				updateExpr, err := updateexpressions.Parse(*item.Update.UpdateExpression)
+				if err != nil {
+					return fmt.Errorf("parse update expression: %w", err)
+				}
+
+				// Start with existing item or empty, ensure key attributes
+				var newItem map[string]types.AttributeValue
+				if oldItem != nil {
+					newItem = make(map[string]types.AttributeValue, len(oldItem))
+					for k, v := range oldItem {
+						newItem[k] = v
+					}
+				} else {
+					newItem = make(map[string]types.AttributeValue)
+				}
+				for k, v := range item.Update.Key {
+					newItem[k] = v
+				}
+
+				// Apply the update expression
+				evalInput := updateexpressions.EvalInput{
+					ExpressionNames:  item.Update.ExpressionAttributeNames,
+					ExpressionValues: item.Update.ExpressionAttributeValues,
+				}
+				newItem, err = updateexpressions.Apply(updateExpr, evalInput, newItem)
+				if err != nil {
+					return fmt.Errorf("apply update expression: %w", err)
+				}
+
+				// Serialize and write
+				itemBytes, err := SerializeItem(newItem)
+				if err != nil {
+					return err
+				}
+
+				if err := txn.Set(key, itemBytes); err != nil {
+					return err
+				}
+
+				// Update GSIs
+				for _, gsi := range schema.gsis {
+					if err := s.updateGSI(txn, gsi, newItem, oldItem); err != nil {
+						return err
+					}
+				}
 			}
 		}
 
