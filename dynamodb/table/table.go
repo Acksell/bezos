@@ -13,23 +13,9 @@ type TableDefinition struct {
 	IsGSI          bool
 	// todo make interface instead? "IsGSI" is begging for inconsistencies, needs type safety instead, whilst still being able to treat GSIs as tables in code.
 	GSIs []TableDefinition
-	// GlobalProjections []ProjectionSpec
-
-	// Optional field for registering entity schemas.
-	// Allows for validation of database operations.
-	// Entities map[string]EntitySchema
-
-	// Indicies []Index
 }
 
-type GSIDefinition struct {
-	IndexName string
-	Key       PrimaryKeyDefinition
-
-	// Entities []DynamoEntity // do reflection and check if the entity implements the key
-}
-
-// todo not sure if this should be in this package. I don't see the immediate benefit. The use case is rare.
+// todo not sure if this should be in this package. I don't see the immediate benefit. The use case is mostly internal.
 func (t TableDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
 	part, ok := doc[t.KeyDefinitions.PartitionKey.Name]
 	if !ok {

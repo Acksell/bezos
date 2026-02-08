@@ -1,9 +1,9 @@
 package ddbstore
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/keyconditions"
-	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
-	"bezos/dynamodb/ddbstore/expressions/writeconditions"
+	"bezos/dynamodb/ddbstore/keyconditions"
+	"bezos/dynamodb/ddbstore/keyconditions/ast"
+	"bezos/dynamodb/ddbstore/writeconditions"
 	"bezos/dynamodb/table"
 	"bytes"
 	"context"

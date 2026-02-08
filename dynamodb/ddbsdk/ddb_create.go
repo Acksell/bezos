@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"bezos/dynamodb/table"
@@ -7,6 +7,6 @@ import (
 )
 
 func NewCreate(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
-	return NewPut(table, key, e).WithCondition(
+	return newPut(table, key, e).WithCondition(
 		expression.AttributeNotExists(expression.Name("meta.created")))
 }

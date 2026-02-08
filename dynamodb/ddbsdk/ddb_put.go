@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"bezos/dynamodb/table"
@@ -11,8 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// todo make private and only allow people to interact via indices?
-func NewPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
+// See NewSafePut and NewUnsafePut instead for the public API.
+func newPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
 	return &Put{
 		Table:  table,
 		Key:    key,

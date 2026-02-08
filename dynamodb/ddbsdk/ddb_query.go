@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"bezos/dynamodb/table"
@@ -169,16 +169,16 @@ func (q *querier) WithEntityFilter(typ string) *querier {
 var Table = table.TableDefinition{
 	Name: "test-table",
 	KeyDefinitions: table.PrimaryKeyDefinition{
-		PartitionKey: table.KeyDef{"pk", table.KeyKindS},
-		SortKey:      table.KeyDef{"sk", table.KeyKindS},
+		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
 	},
 	TimeToLiveKey: "ttl",
 	GSIs: []table.TableDefinition{
 		{
 			Name: "byName",
 			KeyDefinitions: table.PrimaryKeyDefinition{
-				PartitionKey: table.KeyDef{"pk", table.KeyKindS},
-				SortKey:      table.KeyDef{"name", table.KeyKindS},
+				PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+				SortKey:      table.KeyDef{Name: "name", Kind: table.KeyKindS},
 			},
 		},
 	},

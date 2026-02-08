@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"

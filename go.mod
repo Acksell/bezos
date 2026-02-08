@@ -9,7 +9,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression v1.7.27
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.33.2
 	github.com/dgraph-io/badger/v4 v4.9.1
-	github.com/google/btree v1.1.3
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 )

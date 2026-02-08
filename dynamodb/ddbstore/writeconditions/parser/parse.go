@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/writeconditions/ast"
+	"bezos/dynamodb/ddbstore/writeconditions/ast"
 	"fmt"
 )
 

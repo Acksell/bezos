@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/astutil"
+	"bezos/dynamodb/ddbstore/astutil"
 	"fmt"
 )
 

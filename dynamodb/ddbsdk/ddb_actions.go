@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"bezos/dynamodb/table"

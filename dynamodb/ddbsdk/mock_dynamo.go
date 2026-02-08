@@ -1,4 +1,4 @@
-package bzoddb
+package ddbsdk
 
 import (
 	"bezos/dynamodb/ddbstore"
@@ -13,12 +13,3 @@ func NewMock(defs ...table.TableDefinition) IO {
 	// todo implement projection expressions
 	return New(mock)
 }
-
-// todo can remove if mockddb.NewStore() supports all required DDB features.
-type dynamock struct {
-	client AWSDynamoClientV2
-}
-
-var _ IO = &dynamock{}
-var _ Writer = &dynamock{}
-var _ Reader = &dynamock{}

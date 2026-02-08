@@ -1,7 +1,7 @@
 package keyconditions
 
 import (
-	"bezos/dynamodb/ddbstore/expressions/keyconditions/ast"
+	"bezos/dynamodb/ddbstore/keyconditions/ast"
 	"bezos/dynamodb/table"
 	"fmt"
 	"testing"
