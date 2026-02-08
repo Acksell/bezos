@@ -6,11 +6,10 @@
 //
 // Example usage:
 //
-//	expr, err := projectionexpressions.Parse("title, price, #yr")
+//	projected, err := projectionexpressions.Project(expr, names, doc)
 //	if err != nil {
 //	    return err
 //	}
-//	projected, err := projectionexpressions.Apply(expr, input, doc)
 package projectionexpressions
 
 import (
@@ -31,7 +30,7 @@ type ApplyInput struct {
 	ExpressionNames map[string]string
 }
 
-// Apply applies a projection expression to a document, returning only the projected attributes.
+// Apply applies a parsed projection expression to a document, returning only the projected attributes.
 // It extracts only the attributes specified in the projection expression from the source document.
 func Apply(expr *ast.ProjectionExpression, input ApplyInput, doc map[string]types.AttributeValue) (result map[string]types.AttributeValue, err error) {
 	defer func() {
@@ -54,6 +53,50 @@ func Apply(expr *ast.ProjectionExpression, input ApplyInput, doc map[string]type
 		}
 	}
 
+	return result, nil
+}
+
+// Project parses and applies a projection expression to an item in one step.
+// If projExpr is nil or empty, returns the original item unchanged.
+// This is a convenience function for the common use case of applying a projection.
+func Project(projExpr *string, exprNames map[string]string, item map[string]types.AttributeValue) (map[string]types.AttributeValue, error) {
+	if projExpr == nil || *projExpr == "" {
+		return item, nil
+	}
+	if item == nil {
+		return nil, nil
+	}
+
+	parsed, err := Parse(*projExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse projection expression: %w", err)
+	}
+
+	return Apply(parsed, ApplyInput{ExpressionNames: exprNames}, item)
+}
+
+// ProjectAll parses and applies a projection expression to multiple items.
+// If projExpr is nil or empty, returns the original items unchanged.
+// This is more efficient than calling Project repeatedly as it only parses once.
+func ProjectAll(projExpr *string, exprNames map[string]string, items []map[string]types.AttributeValue) ([]map[string]types.AttributeValue, error) {
+	if projExpr == nil || *projExpr == "" {
+		return items, nil
+	}
+
+	parsed, err := Parse(*projExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse projection expression: %w", err)
+	}
+
+	input := ApplyInput{ExpressionNames: exprNames}
+	result := make([]map[string]types.AttributeValue, len(items))
+	for i, item := range items {
+		projected, err := Apply(parsed, input, item)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = projected
+	}
 	return result, nil
 }
 
@@ -192,4 +235,3 @@ func mergeAttributeValues(existing, new types.AttributeValue) (types.AttributeVa
 	// For non-maps (or mixed types), the new value wins
 	return new, nil
 }
-

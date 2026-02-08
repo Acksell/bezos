@@ -2152,3 +2152,494 @@ func TestStore_AllDataTypes(t *testing.T) {
 	m := got.Item["map"].(*types.AttributeValueMemberM).Value
 	assert.Equal(t, "nested", m["nested_string"].(*types.AttributeValueMemberS).Value)
 }
+
+// =============================================================================
+// Projection Expression Tests
+// =============================================================================
+
+func TestStore_GetItem_ProjectionExpression(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	item := map[string]types.AttributeValue{
+		"pk":    &types.AttributeValueMemberS{Value: "user#1"},
+		"sk":    &types.AttributeValueMemberS{Value: "profile"},
+		"name":  &types.AttributeValueMemberS{Value: "John Doe"},
+		"email": &types.AttributeValueMemberS{Value: "john@example.com"},
+		"age":   &types.AttributeValueMemberN{Value: "30"},
+		"address": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+			"city":    &types.AttributeValueMemberS{Value: "New York"},
+			"country": &types.AttributeValueMemberS{Value: "USA"},
+		}},
+		"tags": &types.AttributeValueMemberL{Value: []types.AttributeValue{
+			&types.AttributeValueMemberS{Value: "premium"},
+			&types.AttributeValueMemberS{Value: "active"},
+		}},
+	}
+
+	_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &singleTableDesign.Name,
+		Item:      item,
+	})
+	require.NoError(t, err)
+
+	t.Run("project single attribute", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#n"),
+			ExpressionAttributeNames: map[string]string{
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]types.AttributeValue{
+			"name": &types.AttributeValueMemberS{Value: "John Doe"},
+		}, result.Item)
+	})
+
+	t.Run("project multiple attributes", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#n, email, age"),
+			ExpressionAttributeNames: map[string]string{
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]types.AttributeValue{
+			"name":  &types.AttributeValueMemberS{Value: "John Doe"},
+			"email": &types.AttributeValueMemberS{Value: "john@example.com"},
+			"age":   &types.AttributeValueMemberN{Value: "30"},
+		}, result.Item)
+	})
+
+	t.Run("project nested attribute", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("address.city"),
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]types.AttributeValue{
+			"address": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"city": &types.AttributeValueMemberS{Value: "New York"},
+			}},
+		}, result.Item)
+	})
+
+	t.Run("project list element", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("tags[0]"),
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		// DynamoDB wraps list indices in a list
+		assert.Equal(t, map[string]types.AttributeValue{
+			"tags": &types.AttributeValueMemberL{Value: []types.AttributeValue{
+				&types.AttributeValueMemberS{Value: "premium"},
+			}},
+		}, result.Item)
+	})
+
+	t.Run("project with expression attribute names", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#n, #e"),
+			ExpressionAttributeNames: map[string]string{
+				"#n": "name",
+				"#e": "email",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]types.AttributeValue{
+			"name":  &types.AttributeValueMemberS{Value: "John Doe"},
+			"email": &types.AttributeValueMemberS{Value: "john@example.com"},
+		}, result.Item)
+	})
+
+	t.Run("project nonexistent attribute silently ignored", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#n, nonexistent"),
+			ExpressionAttributeNames: map[string]string{
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "user#1"},
+				"sk": &types.AttributeValueMemberS{Value: "profile"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]types.AttributeValue{
+			"name": &types.AttributeValueMemberS{Value: "John Doe"},
+		}, result.Item)
+	})
+}
+
+func TestStore_Query_ProjectionExpression(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	// Insert multiple items
+	items := []map[string]types.AttributeValue{
+		{
+			"pk":    &types.AttributeValueMemberS{Value: "user#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "order#001"},
+			"total": &types.AttributeValueMemberN{Value: "100"},
+			"item":  &types.AttributeValueMemberS{Value: "Widget"},
+		},
+		{
+			"pk":    &types.AttributeValueMemberS{Value: "user#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "order#002"},
+			"total": &types.AttributeValueMemberN{Value: "200"},
+			"item":  &types.AttributeValueMemberS{Value: "Gadget"},
+		},
+	}
+
+	for _, item := range items {
+		_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: &singleTableDesign.Name,
+			Item:      item,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("project attributes from query results", func(t *testing.T) {
+		result, err := store.Query(ctx, &dynamodb.QueryInput{
+			TableName:              &singleTableDesign.Name,
+			KeyConditionExpression: ptrStr("pk = :pk"),
+			ProjectionExpression:   ptrStr("sk, #t"),
+			ExpressionAttributeNames: map[string]string{
+				"#t": "total",
+			},
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pk": &types.AttributeValueMemberS{Value: "user#1"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.Items, 2)
+
+		// Verify only projected attributes are returned
+		for _, item := range result.Items {
+			assert.Len(t, item, 2)
+			assert.Contains(t, item, "sk")
+			assert.Contains(t, item, "total")
+			assert.NotContains(t, item, "pk")
+			assert.NotContains(t, item, "item")
+		}
+	})
+}
+
+func TestStore_Scan_ProjectionExpression(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	// Insert items
+	items := []map[string]types.AttributeValue{
+		{
+			"pk":     &types.AttributeValueMemberS{Value: "a"},
+			"sk":     &types.AttributeValueMemberS{Value: "1"},
+			"field1": &types.AttributeValueMemberS{Value: "value1"},
+			"field2": &types.AttributeValueMemberS{Value: "value2"},
+		},
+		{
+			"pk":     &types.AttributeValueMemberS{Value: "b"},
+			"sk":     &types.AttributeValueMemberS{Value: "2"},
+			"field1": &types.AttributeValueMemberS{Value: "value3"},
+			"field2": &types.AttributeValueMemberS{Value: "value4"},
+		},
+	}
+
+	for _, item := range items {
+		_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: &singleTableDesign.Name,
+			Item:      item,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("project attributes from scan results", func(t *testing.T) {
+		result, err := store.Scan(ctx, &dynamodb.ScanInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("pk, field1"),
+		})
+		require.NoError(t, err)
+		assert.Len(t, result.Items, 2)
+
+		for _, item := range result.Items {
+			assert.Len(t, item, 2)
+			assert.Contains(t, item, "pk")
+			assert.Contains(t, item, "field1")
+			assert.NotContains(t, item, "sk")
+			assert.NotContains(t, item, "field2")
+		}
+	})
+}
+
+func TestStore_BatchGetItem_ProjectionExpression(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	// Insert items
+	items := []map[string]types.AttributeValue{
+		{
+			"pk":   &types.AttributeValueMemberS{Value: "item#1"},
+			"sk":   &types.AttributeValueMemberS{Value: "data"},
+			"name": &types.AttributeValueMemberS{Value: "First"},
+			"desc": &types.AttributeValueMemberS{Value: "Description 1"},
+		},
+		{
+			"pk":   &types.AttributeValueMemberS{Value: "item#2"},
+			"sk":   &types.AttributeValueMemberS{Value: "data"},
+			"name": &types.AttributeValueMemberS{Value: "Second"},
+			"desc": &types.AttributeValueMemberS{Value: "Description 2"},
+		},
+	}
+
+	for _, item := range items {
+		_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: &singleTableDesign.Name,
+			Item:      item,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("project attributes from batch get", func(t *testing.T) {
+		result, err := store.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]types.KeysAndAttributes{
+				singleTableDesign.Name: {
+					Keys: []map[string]types.AttributeValue{
+						{
+							"pk": &types.AttributeValueMemberS{Value: "item#1"},
+							"sk": &types.AttributeValueMemberS{Value: "data"},
+						},
+						{
+							"pk": &types.AttributeValueMemberS{Value: "item#2"},
+							"sk": &types.AttributeValueMemberS{Value: "data"},
+						},
+					},
+					ProjectionExpression: ptrStr("#n"),
+					ExpressionAttributeNames: map[string]string{
+						"#n": "name",
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		tableResults := result.Responses[singleTableDesign.Name]
+		assert.Len(t, tableResults, 2)
+
+		for _, item := range tableResults {
+			assert.Len(t, item, 1)
+			assert.Contains(t, item, "name")
+			assert.NotContains(t, item, "pk")
+			assert.NotContains(t, item, "sk")
+			assert.NotContains(t, item, "desc")
+		}
+	})
+}
+
+func TestStore_TransactGetItems_ProjectionExpression(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	// Insert items
+	items := []map[string]types.AttributeValue{
+		{
+			"pk":    &types.AttributeValueMemberS{Value: "tx#1"},
+			"sk":    &types.AttributeValueMemberS{Value: "data"},
+			"field": &types.AttributeValueMemberS{Value: "value1"},
+			"extra": &types.AttributeValueMemberS{Value: "extra1"},
+		},
+		{
+			"pk":    &types.AttributeValueMemberS{Value: "tx#2"},
+			"sk":    &types.AttributeValueMemberS{Value: "data"},
+			"field": &types.AttributeValueMemberS{Value: "value2"},
+			"extra": &types.AttributeValueMemberS{Value: "extra2"},
+		},
+	}
+
+	for _, item := range items {
+		_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+			TableName: &singleTableDesign.Name,
+			Item:      item,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("project attributes from transact get", func(t *testing.T) {
+		result, err := store.TransactGetItems(ctx, &dynamodb.TransactGetItemsInput{
+			TransactItems: []types.TransactGetItem{
+				{
+					Get: &types.Get{
+						TableName:            &singleTableDesign.Name,
+						ProjectionExpression: ptrStr("field"),
+						Key: map[string]types.AttributeValue{
+							"pk": &types.AttributeValueMemberS{Value: "tx#1"},
+							"sk": &types.AttributeValueMemberS{Value: "data"},
+						},
+					},
+				},
+				{
+					Get: &types.Get{
+						TableName:            &singleTableDesign.Name,
+						ProjectionExpression: ptrStr("pk, field"),
+						Key: map[string]types.AttributeValue{
+							"pk": &types.AttributeValueMemberS{Value: "tx#2"},
+							"sk": &types.AttributeValueMemberS{Value: "data"},
+						},
+					},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		assert.Len(t, result.Responses, 2)
+
+		// First item should only have 'field'
+		assert.Equal(t, map[string]types.AttributeValue{
+			"field": &types.AttributeValueMemberS{Value: "value1"},
+		}, result.Responses[0].Item)
+
+		// Second item should have 'pk' and 'field'
+		assert.Equal(t, map[string]types.AttributeValue{
+			"pk":    &types.AttributeValueMemberS{Value: "tx#2"},
+			"field": &types.AttributeValueMemberS{Value: "value2"},
+		}, result.Responses[1].Item)
+	})
+}
+
+func TestStore_ProjectionExpression_ComplexNested(t *testing.T) {
+	store := newTestStore(t, singleTableDesign)
+	ctx := context.Background()
+
+	// Create deeply nested item
+	item := map[string]types.AttributeValue{
+		"pk": &types.AttributeValueMemberS{Value: "complex"},
+		"sk": &types.AttributeValueMemberS{Value: "nested"},
+		"user": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+			"profile": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"name": &types.AttributeValueMemberS{Value: "Deep Name"},
+				"bio":  &types.AttributeValueMemberS{Value: "Deep Bio"},
+			}},
+			"settings": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"theme": &types.AttributeValueMemberS{Value: "dark"},
+			}},
+		}},
+		"items": &types.AttributeValueMemberL{Value: []types.AttributeValue{
+			&types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"id":   &types.AttributeValueMemberS{Value: "a"},
+				"name": &types.AttributeValueMemberS{Value: "Item A"},
+			}},
+			&types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"id":   &types.AttributeValueMemberS{Value: "b"},
+				"name": &types.AttributeValueMemberS{Value: "Item B"},
+			}},
+		}},
+	}
+
+	_, err := store.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &singleTableDesign.Name,
+		Item:      item,
+	})
+	require.NoError(t, err)
+
+	t.Run("deeply nested projection", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName: &singleTableDesign.Name,
+			// todo, check if alias is needed even for nested fields that have reserved names.
+			ProjectionExpression: ptrStr("#u.profile.#n"),
+			ExpressionAttributeNames: map[string]string{
+				"#u": "user",
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "complex"},
+				"sk": &types.AttributeValueMemberS{Value: "nested"},
+			},
+		})
+		require.NoError(t, err)
+
+		expected := map[string]types.AttributeValue{
+			"user": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"profile": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+					"name": &types.AttributeValueMemberS{Value: "Deep Name"},
+				}},
+			}},
+		}
+		assert.Equal(t, expected, result.Item)
+	})
+
+	t.Run("list item nested attribute", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#i[0].#n"),
+			ExpressionAttributeNames: map[string]string{
+				"#i": "items",
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "complex"},
+				"sk": &types.AttributeValueMemberS{Value: "nested"},
+			},
+		})
+		require.NoError(t, err)
+
+		expected := map[string]types.AttributeValue{
+			"items": &types.AttributeValueMemberL{Value: []types.AttributeValue{
+				&types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+					"name": &types.AttributeValueMemberS{Value: "Item A"},
+				}},
+			}},
+		}
+		assert.Equal(t, expected, result.Item)
+	})
+
+	t.Run("multiple paths merge correctly", func(t *testing.T) {
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+			TableName:            &singleTableDesign.Name,
+			ProjectionExpression: ptrStr("#u.profile.#n, #u.settings.theme"),
+			ExpressionAttributeNames: map[string]string{
+				"#u": "user",
+				"#n": "name",
+			},
+			Key: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "complex"},
+				"sk": &types.AttributeValueMemberS{Value: "nested"},
+			},
+		})
+		require.NoError(t, err)
+
+		expected := map[string]types.AttributeValue{
+			"user": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+				"profile": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+					"name": &types.AttributeValueMemberS{Value: "Deep Name"},
+				}},
+				"settings": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+					"theme": &types.AttributeValueMemberS{Value: "dark"},
+				}},
+			}},
+		}
+		assert.Equal(t, expected, result.Item)
+	})
+}

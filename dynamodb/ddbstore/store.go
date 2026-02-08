@@ -3,6 +3,7 @@ package ddbstore
 import (
 	"bezos/dynamodb/ddbstore/keyconditions"
 	"bezos/dynamodb/ddbstore/keyconditions/ast"
+	"bezos/dynamodb/ddbstore/projectionexpressions"
 	"bezos/dynamodb/ddbstore/updateexpressions"
 	updateast "bezos/dynamodb/ddbstore/updateexpressions/ast"
 	"bezos/dynamodb/ddbstore/writeconditions"
@@ -161,7 +162,12 @@ func (s *Store) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optF
 		return nil, err
 	}
 
-	// TODO: Handle ProjectionExpression
+	// Apply projection expression if specified
+	item, err = projectionexpressions.Project(params.ProjectionExpression, params.ExpressionAttributeNames, item)
+	if err != nil {
+		return nil, err
+	}
+
 	return &dynamodb.GetItemOutput{Item: item}, nil
 }
 
@@ -575,6 +581,12 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 		return nil, err
 	}
 
+	// Apply projection expression to results
+	items, err = projectionexpressions.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
+	if err != nil {
+		return nil, err
+	}
+
 	count := int32(len(items))
 	return &dynamodb.QueryOutput{
 		Items:            items,
@@ -777,6 +789,12 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 		return nil, err
 	}
 
+	// Apply projection expression to results
+	items, err = projectionexpressions.ProjectAll(params.ProjectionExpression, params.ExpressionAttributeNames, items)
+	if err != nil {
+		return nil, err
+	}
+
 	count := int32(len(items))
 	return &dynamodb.ScanOutput{
 		Items:            items,
@@ -973,7 +991,12 @@ func (s *Store) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemI
 					return err
 				}
 
-				// TODO: Handle ProjectionExpression
+				// Apply projection expression if specified
+				item, err = projectionexpressions.Project(keysAndAttrs.ProjectionExpression, keysAndAttrs.ExpressionAttributeNames, item)
+				if err != nil {
+					return err
+				}
+
 				response.Responses[tableName] = append(response.Responses[tableName], item)
 			}
 		}
@@ -1154,7 +1177,12 @@ func (s *Store) TransactGetItems(ctx context.Context, params *dynamodb.TransactG
 				return err
 			}
 
-			// TODO: Handle ProjectionExpression
+			// Apply projection expression if specified
+			docItem, err = projectionexpressions.Project(item.Get.ProjectionExpression, item.Get.ExpressionAttributeNames, docItem)
+			if err != nil {
+				return err
+			}
+
 			response.Responses = append(response.Responses, types.ItemResponse{Item: docItem})
 		}
 		return nil
