@@ -50,32 +50,32 @@ func toAttributeValue(val any, kind table.KeyKind) (types.AttributeValue, error)
 	}
 }
 
-// field extracts a value from a field path in the item.
-type field struct {
-	path []string
+// FieldRef extracts a value from a field path in the item.
+type FieldRef struct {
+	Path []string
 }
 
-func (f field) Extract(item map[string]types.AttributeValue) (any, error) {
+func (f FieldRef) Extract(item map[string]types.AttributeValue) (any, error) {
 	current := item
 
 	// Navigate to the nested field
-	for i, key := range f.path[:len(f.path)-1] {
+	for i, key := range f.Path[:len(f.Path)-1] {
 		av, ok := current[key]
 		if !ok {
-			return nil, fmt.Errorf("field %q not found at path %v", key, f.path[:i+1])
+			return nil, fmt.Errorf("field %q not found at path %v", key, f.Path[:i+1])
 		}
 		mapVal, ok := av.(*types.AttributeValueMemberM)
 		if !ok {
-			return nil, fmt.Errorf("field %q is not a map (got %T), cannot traverse path %v", key, av, f.path)
+			return nil, fmt.Errorf("field %q is not a map (got %T), cannot traverse path %v", key, av, f.Path)
 		}
 		current = mapVal.Value
 	}
 
 	// Extract the final field
-	finalKey := f.path[len(f.path)-1]
+	finalKey := f.Path[len(f.Path)-1]
 	av, ok := current[finalKey]
 	if !ok {
-		return nil, fmt.Errorf("field %q not found", strings.Join(f.path, "."))
+		return nil, fmt.Errorf("field %q not found", strings.Join(f.Path, "."))
 	}
 
 	return extractValue(av)
@@ -95,27 +95,28 @@ func extractValue(av types.AttributeValue) (any, error) {
 	}
 }
 
-// constVal is a constant value, pre-marshaled to an AttributeValue.
-type constVal struct {
-	av types.AttributeValue
+// ConstVal is a constant value, pre-marshaled to an AttributeValue.
+type ConstVal struct {
+	Value any
+	av    types.AttributeValue
 }
 
-func (c constVal) Extract(_ map[string]types.AttributeValue) (any, error) {
+func (c ConstVal) Extract(_ map[string]types.AttributeValue) (any, error) {
 	return extractValue(c.av)
 }
 
-// format is a composite of multiple extractors that produces a formatted string.
-type format struct {
-	parts []Extractor
+// FormatExpr is a composite of multiple extractors that produces a formatted string.
+type FormatExpr struct {
+	Parts []Extractor
 }
 
-func (f format) Extract(item map[string]types.AttributeValue) (any, error) {
-	if len(f.parts) == 0 {
+func (f FormatExpr) Extract(item map[string]types.AttributeValue) (any, error) {
+	if len(f.Parts) == 0 {
 		return nil, fmt.Errorf("key format has no parts")
 	}
 
 	var result strings.Builder
-	for i, p := range f.parts {
+	for i, p := range f.Parts {
 		val, err := p.Extract(item)
 		if err != nil {
 			return nil, fmt.Errorf("part %d: %w", i, err)
@@ -131,13 +132,13 @@ func (f format) Extract(item map[string]types.AttributeValue) (any, error) {
 //
 // Field can be used standalone or as a component in Fmt:
 //
-//	keys.Field("createdAt")                      // extracts createdAt field directly
-//	keys.Fmt("USER#%s", keys.Field("userID"))    // USER#123
-func Field(path ...string) Extractor {
+//	keys.Field("createdAt")                   // extracts createdAt field directly
+//	keys.Fmt("USER#%s", keys.Field("userID")) // USER#123
+func Field(path ...string) FieldRef {
 	if len(path) == 0 {
 		panic("Field requires at least one path element")
 	}
-	return field{path: path}
+	return FieldRef{Path: path}
 }
 
 // Const creates an Extractor that always returns the given constant value.
@@ -148,12 +149,12 @@ func Field(path ...string) Extractor {
 //
 //	keys.Const("PROFILE")  // always returns "PROFILE"
 //	keys.Const(123)        // numeric constant
-func Const(value any) Extractor {
+func Const(value any) ConstVal {
 	av, err := attributevalue.Marshal(value)
 	if err != nil {
 		panic(fmt.Sprintf("Const: cannot marshal %T: %v", value, err))
 	}
-	return constVal{av: av}
+	return ConstVal{Value: value, av: av}
 }
 
 // Fmt creates an Extractor using a printf-style format string.
@@ -161,9 +162,9 @@ func Const(value any) Extractor {
 //
 // Examples:
 //
-//	keys.Fmt("USER#%s", keys.Field("userID"))                        // USER#123
-//	keys.Fmt("ORDER#%s#%s", keys.Field("tenant"), keys.Field("id"))  // ORDER#acme#456
-func Fmt(fmtStr string, parts ...Extractor) Extractor {
+//	keys.Fmt("USER#%s", keys.Field("userID"))                     // USER#123
+//	keys.Fmt("ORDER#%s#%s", keys.Field("tenant"), keys.Field("id")) // ORDER#acme#456
+func Fmt(fmtStr string, parts ...Extractor) FormatExpr {
 	segments := strings.Split(fmtStr, "%s")
 
 	if len(segments)-1 != len(parts) {
@@ -182,5 +183,5 @@ func Fmt(fmtStr string, parts ...Extractor) Extractor {
 		}
 	}
 
-	return format{parts: result}
+	return FormatExpr{Parts: result}
 }

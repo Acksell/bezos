@@ -1,16 +1,15 @@
-package index_test
+package index
 
 import (
 	"testing"
 
-	"github.com/acksell/bezos/dynamodb/index"
-	"github.com/acksell/bezos/dynamodb/keys"
+	"github.com/acksell/bezos/dynamodb/index/keys"
 	"github.com/acksell/bezos/dynamodb/table"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 func TestSecondaryIndex_ExtractKeys(t *testing.T) {
-	gsi := index.SecondaryIndex{
+	gsi := SecondaryIndex{
 		Name: "gsi1",
 		PartitionKey: keys.Key{
 			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
@@ -49,7 +48,7 @@ func TestSecondaryIndex_ExtractKeys(t *testing.T) {
 }
 
 func TestSecondaryIndex_SparseIndex(t *testing.T) {
-	gsi := index.SecondaryIndex{
+	gsi := SecondaryIndex{
 		Name: "gsi1",
 		PartitionKey: keys.Key{
 			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
@@ -86,7 +85,7 @@ func TestPrimaryIndex_ExtractAllGSIKeys(t *testing.T) {
 		},
 	}
 
-	gsi1 := index.SecondaryIndex{
+	gsi1 := SecondaryIndex{
 		Name: "gsi1",
 		PartitionKey: keys.Key{
 			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
@@ -98,7 +97,7 @@ func TestPrimaryIndex_ExtractAllGSIKeys(t *testing.T) {
 		},
 	}
 
-	gsi2 := index.SecondaryIndex{
+	gsi2 := SecondaryIndex{
 		Name: "gsi2",
 		PartitionKey: keys.Key{
 			Def:       table.KeyDef{Name: "gsi2pk", Kind: table.KeyKindS},
@@ -110,11 +109,11 @@ func TestPrimaryIndex_ExtractAllGSIKeys(t *testing.T) {
 		},
 	}
 
-	idx := index.PrimaryIndex{
+	idx := PrimaryIndex{
 		Table:        tbl,
 		PartitionKey: keys.Fmt("USER#%s", keys.Field("userID")),
 		SortKey:      keys.Const("PROFILE"),
-		Secondary:    []index.SecondaryIndex{gsi1, gsi2},
+		Secondary:    []SecondaryIndex{gsi1, gsi2},
 	}
 
 	item := map[string]types.AttributeValue{

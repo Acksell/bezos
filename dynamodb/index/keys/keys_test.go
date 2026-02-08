@@ -3,7 +3,7 @@ package keys_test
 import (
 	"testing"
 
-	"github.com/acksell/bezos/dynamodb/keys"
+	"github.com/acksell/bezos/dynamodb/index/keys"
 	"github.com/acksell/bezos/dynamodb/table"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )

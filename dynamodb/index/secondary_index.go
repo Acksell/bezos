@@ -3,7 +3,7 @@ package index
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/keys"
+	"github.com/acksell/bezos/dynamodb/index/keys"
 	"github.com/acksell/bezos/dynamodb/table"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
@@ -15,8 +15,14 @@ import (
 //
 //	var EmailGSI = indices.SecondaryIndex{
 //	    Name:         "gsi1",
-//	    PartitionKey: keys.Key{Def: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS}, Extractor: keys.Fmt("EMAIL#%s", keys.Field("email"))},
-//	    SortKey:      &keys.Key{Def: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS}, Extractor: keys.Fmt("USER#%s", keys.Field("userID"))},
+//	    PartitionKey: keys.Key{
+//			Def: table.KeyDefinitions.PartitionKey,
+//			Extractor: keys.Fmt("EMAIL#%s", keys.Field("email")),
+//		},
+//	    SortKey: &keys.Key{
+//			Def: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+//			Extractor: keys.Fmt("USER#%s", keys.Field("userID"))
+//		},
 //	}
 type SecondaryIndex struct {
 	// Name is the GSI name as defined in DynamoDB
@@ -50,6 +56,17 @@ func (si SecondaryIndex) ExtractKeys(item map[string]types.AttributeValue) (map[
 	}
 
 	return result, nil
+}
+
+// KeyDefinition returns the key definition for this GSI.
+func (si SecondaryIndex) KeyDefinition() table.PrimaryKeyDefinition {
+	keyDef := table.PrimaryKeyDefinition{
+		PartitionKey: si.PartitionKey.Def,
+	}
+	if si.SortKey != nil {
+		keyDef.SortKey = si.SortKey.Def
+	}
+	return keyDef
 }
 
 // ToTableDefinition returns a table.TableDefinition representing this GSI.
