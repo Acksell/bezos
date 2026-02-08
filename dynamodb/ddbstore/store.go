@@ -5,7 +5,6 @@ import (
 	"bezos/dynamodb/ddbstore/keyconditions/ast"
 	"bezos/dynamodb/ddbstore/projectionexpressions"
 	"bezos/dynamodb/ddbstore/updateexpressions"
-	updateast "bezos/dynamodb/ddbstore/updateexpressions/ast"
 	"bezos/dynamodb/ddbstore/writeconditions"
 	"bezos/dynamodb/table"
 	"bytes"
@@ -837,11 +836,11 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 		return nil, fmt.Errorf("parse update expression: %w", err)
 	}
 
-	var oldItem map[string]types.AttributeValue
-	var newItem map[string]types.AttributeValue
+	var evalOutput *updateexpressions.EvalOutput
 
 	err = s.db.Update(func(txn *badger.Txn) error {
 		// Get existing item
+		var oldItem map[string]types.AttributeValue
 		existingItem, err := txn.Get(key)
 		if err != nil && err != badger.ErrKeyNotFound {
 			return err
@@ -874,33 +873,28 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 			}
 		}
 
-		// Start with existing item or empty item, and add the key attributes
-		if oldItem != nil {
-			newItem = make(map[string]types.AttributeValue, len(oldItem))
-			for k, v := range oldItem {
-				newItem[k] = v
-			}
-		} else {
-			newItem = make(map[string]types.AttributeValue)
+		// Prepare the base item with key attributes
+		baseItem := make(map[string]types.AttributeValue)
+		for k, v := range oldItem {
+			baseItem[k] = v
 		}
-
-		// Ensure key attributes are present
 		for k, v := range params.Key {
-			newItem[k] = v
+			baseItem[k] = v
 		}
 
-		// Apply the update expression
+		// Apply the update expression with return values handling
 		evalInput := updateexpressions.EvalInput{
 			ExpressionNames:  params.ExpressionAttributeNames,
 			ExpressionValues: params.ExpressionAttributeValues,
+			ReturnValues:     params.ReturnValues,
 		}
-		newItem, err = updateexpressions.Apply(updateExpr, evalInput, newItem)
+		evalOutput, err = updateexpressions.Apply(updateExpr, evalInput, baseItem)
 		if err != nil {
 			return fmt.Errorf("apply update expression: %w", err)
 		}
 
 		// Serialize and write the updated item
-		itemBytes, err := SerializeItem(newItem)
+		itemBytes, err := SerializeItem(evalOutput.Item)
 		if err != nil {
 			return fmt.Errorf("serialize item: %w", err)
 		}
@@ -911,7 +905,7 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 
 		// Handle GSI updates
 		for _, gsi := range schema.gsis {
-			if err := s.updateGSI(txn, gsi, newItem, oldItem); err != nil {
+			if err := s.updateGSI(txn, gsi, evalOutput.Item, oldItem); err != nil {
 				return err
 			}
 		}
@@ -923,21 +917,15 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 		return nil, err
 	}
 
-	out := &dynamodb.UpdateItemOutput{}
-	switch params.ReturnValues {
-	case types.ReturnValueAllOld:
-		out.Attributes = oldItem
-	case types.ReturnValueAllNew:
-		out.Attributes = newItem
-	case types.ReturnValueUpdatedOld:
-		// Return only the attributes that were updated with their old values
-		out.Attributes = extractUpdatedAttributes(updateExpr, oldItem)
-	case types.ReturnValueUpdatedNew:
-		// Return only the attributes that were updated with their new values
-		out.Attributes = extractUpdatedAttributes(updateExpr, newItem)
-	}
-
-	return out, nil
+	return &dynamodb.UpdateItemOutput{
+		// This is not thread safe:
+		// we may not return the correct result
+		// ALL_OLD - may return an older version.
+		// ALL_NEW - may return a different value than the actual
+		// UPDATED_OLD - may return an older version than the actual old value.
+		// UPDATED_NEW - may return a different value than the actual updated value.
+		Attributes: evalOutput.ReturnAttributes,
+	}, nil
 }
 
 // BatchGetItem retrieves multiple items by their primary keys.
@@ -1491,17 +1479,12 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 				// Start with existing item or empty, ensure key attributes
-				var newItem map[string]types.AttributeValue
-				if oldItem != nil {
-					newItem = make(map[string]types.AttributeValue, len(oldItem))
-					for k, v := range oldItem {
-						newItem[k] = v
-					}
-				} else {
-					newItem = make(map[string]types.AttributeValue)
+				baseItem := make(map[string]types.AttributeValue)
+				for k, v := range oldItem {
+					baseItem[k] = v
 				}
 				for k, v := range item.Update.Key {
-					newItem[k] = v
+					baseItem[k] = v
 				}
 
 				// Apply the update expression
@@ -1509,13 +1492,13 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 					ExpressionNames:  item.Update.ExpressionAttributeNames,
 					ExpressionValues: item.Update.ExpressionAttributeValues,
 				}
-				newItem, err = updateexpressions.Apply(updateExpr, evalInput, newItem)
+				evalOutput, err := updateexpressions.Apply(updateExpr, evalInput, baseItem)
 				if err != nil {
 					return fmt.Errorf("apply update expression: %w", err)
 				}
 
 				// Serialize and write
-				itemBytes, err := SerializeItem(newItem)
+				itemBytes, err := SerializeItem(evalOutput.Item)
 				if err != nil {
 					return err
 				}
@@ -1526,7 +1509,7 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 
 				// Update GSIs
 				for _, gsi := range schema.gsis {
-					if err := s.updateGSI(txn, gsi, newItem, oldItem); err != nil {
+					if err := s.updateGSI(txn, gsi, evalOutput.Item, oldItem); err != nil {
 						return err
 					}
 				}
@@ -1599,54 +1582,4 @@ func incrementBytes(b []byte) []byte {
 	}
 	// Overflow - append 0x00
 	return append(result, 0x00)
-}
-
-// extractUpdatedAttributes extracts attributes that were modified by an update expression.
-func extractUpdatedAttributes(expr *updateast.UpdateExpression, item map[string]types.AttributeValue) map[string]types.AttributeValue {
-	if item == nil {
-		return nil
-	}
-	result := make(map[string]types.AttributeValue)
-
-	// Extract paths from SET actions
-	for _, action := range expr.SetActions {
-		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
-			name := action.Path.Parts[0].Identifier.GetName(nil)
-			if val, ok := item[name]; ok {
-				result[name] = val
-			}
-		}
-	}
-
-	// Extract paths from REMOVE actions
-	for _, action := range expr.RemoveActions {
-		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
-			name := action.Path.Parts[0].Identifier.GetName(nil)
-			if val, ok := item[name]; ok {
-				result[name] = val
-			}
-		}
-	}
-
-	// Extract paths from ADD actions
-	for _, action := range expr.AddActions {
-		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
-			name := action.Path.Parts[0].Identifier.GetName(nil)
-			if val, ok := item[name]; ok {
-				result[name] = val
-			}
-		}
-	}
-
-	// Extract paths from DELETE actions
-	for _, action := range expr.DeleteActions {
-		if len(action.Path.Parts) > 0 && action.Path.Parts[0].Identifier != nil {
-			name := action.Path.Parts[0].Identifier.GetName(nil)
-			if val, ok := item[name]; ok {
-				result[name] = val
-			}
-		}
-	}
-
-	return result
 }

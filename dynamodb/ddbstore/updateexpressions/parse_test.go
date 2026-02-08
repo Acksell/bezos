@@ -168,8 +168,8 @@ func TestApplySetActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "hello" {
-			t.Errorf("Expected foo='hello', got %v", result["foo"])
+		if v, ok := result.Item["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "hello" {
+			t.Errorf("Expected foo='hello', got %v", result.Item["foo"])
 		}
 	})
 
@@ -193,8 +193,8 @@ func TestApplySetActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "15" {
-			t.Errorf("Expected counter=15, got %v", result["counter"])
+		if v, ok := result.Item["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "15" {
+			t.Errorf("Expected counter=15, got %v", result.Item["counter"])
 		}
 	})
 
@@ -215,8 +215,8 @@ func TestApplySetActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "existing" {
-			t.Errorf("Expected foo='existing', got %v", result["foo"])
+		if v, ok := result.Item["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "existing" {
+			t.Errorf("Expected foo='existing', got %v", result.Item["foo"])
 		}
 	})
 
@@ -234,8 +234,8 @@ func TestApplySetActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "default" {
-			t.Errorf("Expected foo='default', got %v", result["foo"])
+		if v, ok := result.Item["foo"].(*types.AttributeValueMemberS); !ok || v.Value != "default" {
+			t.Errorf("Expected foo='default', got %v", result.Item["foo"])
 		}
 	})
 
@@ -261,9 +261,9 @@ func TestApplySetActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		list, ok := result["myList"].(*types.AttributeValueMemberL)
+		list, ok := result.Item["myList"].(*types.AttributeValueMemberL)
 		if !ok {
-			t.Fatalf("Expected list, got %T", result["myList"])
+			t.Fatalf("Expected list, got %T", result.Item["myList"])
 		}
 		if len(list.Value) != 3 {
 			t.Errorf("Expected 3 elements, got %d", len(list.Value))
@@ -287,10 +287,10 @@ func TestApplyRemoveActions(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	if _, ok := result["foo"]; ok {
+	if _, ok := result.Item["foo"]; ok {
 		t.Errorf("Expected foo to be removed")
 	}
-	if _, ok := result["bar"]; !ok {
+	if _, ok := result.Item["bar"]; !ok {
 		t.Errorf("Expected bar to remain")
 	}
 }
@@ -316,8 +316,8 @@ func TestApplyAddActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "15" {
-			t.Errorf("Expected counter=15, got %v", result["counter"])
+		if v, ok := result.Item["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "15" {
+			t.Errorf("Expected counter=15, got %v", result.Item["counter"])
 		}
 	})
 
@@ -338,9 +338,9 @@ func TestApplyAddActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		set, ok := result["mySet"].(*types.AttributeValueMemberSS)
+		set, ok := result.Item["mySet"].(*types.AttributeValueMemberSS)
 		if !ok {
-			t.Fatalf("Expected string set, got %T", result["mySet"])
+			t.Fatalf("Expected string set, got %T", result.Item["mySet"])
 		}
 		if len(set.Value) != 4 {
 			t.Errorf("Expected 4 elements, got %d", len(set.Value))
@@ -364,8 +364,8 @@ func TestApplyAddActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Apply() error = %v", err)
 		}
-		if v, ok := result["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "5" {
-			t.Errorf("Expected counter=5, got %v", result["counter"])
+		if v, ok := result.Item["counter"].(*types.AttributeValueMemberN); !ok || v.Value != "5" {
+			t.Errorf("Expected counter=5, got %v", result.Item["counter"])
 		}
 	})
 }
@@ -391,9 +391,9 @@ func TestApplyDeleteActions(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	set, ok := result["mySet"].(*types.AttributeValueMemberSS)
+	set, ok := result.Item["mySet"].(*types.AttributeValueMemberSS)
 	if !ok {
-		t.Fatalf("Expected string set, got %T", result["mySet"])
+		t.Fatalf("Expected string set, got %T", result.Item["mySet"])
 	}
 
 	if len(set.Value) != 3 {
@@ -502,4 +502,205 @@ func TestPathOverlapValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReturnValues(t *testing.T) {
+	tests := []struct {
+		name         string
+		expr         string
+		names        map[string]string
+		oldItem      map[string]types.AttributeValue
+		returnValues types.ReturnValue
+		wantAttrs    map[string]bool // attribute names we expect in ReturnAttributes
+	}{
+		{
+			name:  "ALL_OLD returns entire old item",
+			expr:  "SET #c = #c + :inc",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"pk":      &types.AttributeValueMemberS{Value: "id1"},
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+				"myname":  &types.AttributeValueMemberS{Value: "test"},
+			},
+			returnValues: types.ReturnValueAllOld,
+			wantAttrs:    map[string]bool{"pk": true, "counter": true, "myname": true},
+		},
+		{
+			name:  "ALL_NEW returns entire new item",
+			expr:  "SET #c = #c + :inc",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"pk":      &types.AttributeValueMemberS{Value: "id1"},
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+				"myname":  &types.AttributeValueMemberS{Value: "test"},
+			},
+			returnValues: types.ReturnValueAllNew,
+			wantAttrs:    map[string]bool{"pk": true, "counter": true, "myname": true},
+		},
+		{
+			name:  "UPDATED_OLD returns only updated attrs from old",
+			expr:  "SET #c = #c + :inc",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"pk":      &types.AttributeValueMemberS{Value: "id1"},
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+				"myname":  &types.AttributeValueMemberS{Value: "test"},
+			},
+			returnValues: types.ReturnValueUpdatedOld,
+			wantAttrs:    map[string]bool{"counter": true},
+		},
+		{
+			name:  "UPDATED_NEW returns only updated attrs from new",
+			expr:  "SET #c = #c + :inc",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"pk":      &types.AttributeValueMemberS{Value: "id1"},
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+				"myname":  &types.AttributeValueMemberS{Value: "test"},
+			},
+			returnValues: types.ReturnValueUpdatedNew,
+			wantAttrs:    map[string]bool{"counter": true},
+		},
+		{
+			name:  "UPDATED_OLD with nested path returns top-level attr",
+			expr:  "SET #u.profile.age = :age",
+			names: map[string]string{"#u": "userdata"},
+			oldItem: map[string]types.AttributeValue{
+				"pk": &types.AttributeValueMemberS{Value: "id1"},
+				"userdata": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+					"profile": &types.AttributeValueMemberM{Value: map[string]types.AttributeValue{
+						"age": &types.AttributeValueMemberN{Value: "25"},
+					}},
+				}},
+				"myname": &types.AttributeValueMemberS{Value: "test"},
+			},
+			returnValues: types.ReturnValueUpdatedOld,
+			wantAttrs:    map[string]bool{"userdata": true},
+		},
+		{
+			name:  "UPDATED_NEW with multiple attrs returns all touched",
+			expr:  "SET #c = #c + :inc REMOVE myname",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"pk":      &types.AttributeValueMemberS{Value: "id1"},
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+				"myname":  &types.AttributeValueMemberS{Value: "test"},
+				"other":   &types.AttributeValueMemberS{Value: "untouched"},
+			},
+			returnValues: types.ReturnValueUpdatedNew,
+			wantAttrs:    map[string]bool{"counter": true}, // myname was removed, so won't be in new
+		},
+		{
+			name:  "NONE returns nil",
+			expr:  "SET #c = #c + :inc",
+			names: map[string]string{"#c": "counter"},
+			oldItem: map[string]types.AttributeValue{
+				"counter": &types.AttributeValueMemberN{Value: "10"},
+			},
+			returnValues: types.ReturnValueNone,
+			wantAttrs:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.expr)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			input := EvalInput{
+				ExpressionNames: tt.names,
+				ExpressionValues: map[string]types.AttributeValue{
+					":inc": &types.AttributeValueMemberN{Value: "5"},
+					":age": &types.AttributeValueMemberN{Value: "30"},
+				},
+				ReturnValues: tt.returnValues,
+			}
+
+			result, err := Apply(expr, input, tt.oldItem)
+			if err != nil {
+				t.Fatalf("Apply() error = %v", err)
+			}
+
+			if tt.wantAttrs == nil {
+				if result.ReturnAttributes != nil {
+					t.Errorf("Expected nil ReturnAttributes, got %v", result.ReturnAttributes)
+				}
+				return
+			}
+
+			if len(result.ReturnAttributes) != len(tt.wantAttrs) {
+				t.Errorf("Expected %d return attributes, got %d: %v",
+					len(tt.wantAttrs), len(result.ReturnAttributes), result.ReturnAttributes)
+			}
+
+			for name := range tt.wantAttrs {
+				if _, ok := result.ReturnAttributes[name]; !ok {
+					t.Errorf("Expected attribute %q in return, but not found", name)
+				}
+			}
+
+			// Verify no unexpected attributes
+			for name := range result.ReturnAttributes {
+				if !tt.wantAttrs[name] {
+					t.Errorf("Unexpected attribute %q in return", name)
+				}
+			}
+		})
+	}
+}
+
+func TestReturnValuesVerifyContent(t *testing.T) {
+	t.Run("UPDATED_OLD contains old value, UPDATED_NEW contains new value", func(t *testing.T) {
+		expr, err := Parse("SET #c = #c + :inc")
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+
+		oldItem := map[string]types.AttributeValue{
+			"pk":      &types.AttributeValueMemberS{Value: "id1"},
+			"counter": &types.AttributeValueMemberN{Value: "10"},
+		}
+
+		// Test UPDATED_OLD
+		resultOld, err := Apply(expr, EvalInput{
+			ExpressionNames: map[string]string{"#c": "counter"},
+			ExpressionValues: map[string]types.AttributeValue{
+				":inc": &types.AttributeValueMemberN{Value: "5"},
+			},
+			ReturnValues: types.ReturnValueUpdatedOld,
+		}, oldItem)
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+
+		oldCounter, ok := resultOld.ReturnAttributes["counter"].(*types.AttributeValueMemberN)
+		if !ok {
+			t.Fatalf("Expected counter in UPDATED_OLD return")
+		}
+		if oldCounter.Value != "10" {
+			t.Errorf("UPDATED_OLD counter = %q, want %q", oldCounter.Value, "10")
+		}
+
+		// Test UPDATED_NEW with same expression
+		resultNew, err := Apply(expr, EvalInput{
+			ExpressionNames: map[string]string{"#c": "counter"},
+			ExpressionValues: map[string]types.AttributeValue{
+				":inc": &types.AttributeValueMemberN{Value: "5"},
+			},
+			ReturnValues: types.ReturnValueUpdatedNew,
+		}, oldItem)
+		if err != nil {
+			t.Fatalf("Apply() error = %v", err)
+		}
+
+		newCounter, ok := resultNew.ReturnAttributes["counter"].(*types.AttributeValueMemberN)
+		if !ok {
+			t.Fatalf("Expected counter in UPDATED_NEW return")
+		}
+		if newCounter.Value != "15" {
+			t.Errorf("UPDATED_NEW counter = %q, want %q", newCounter.Value, "15")
+		}
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"bezos/dynamodb/ddbstore/updateexpressions/parser"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
@@ -18,12 +19,31 @@ func Parse(expr string) (*ast.UpdateExpression, error) {
 type EvalInput struct {
 	ExpressionNames  map[string]string
 	ExpressionValues map[string]types.AttributeValue
+	ReturnValues     types.ReturnValue
 }
 
-// Apply applies the parsed UpdateExpression to a document, returning the modified document.
-func Apply(expr *ast.UpdateExpression, input EvalInput, doc map[string]types.AttributeValue) (map[string]types.AttributeValue, error) {
-	if doc == nil {
-		doc = make(map[string]types.AttributeValue)
+// EvalOutput contains the result of applying an update expression.
+// Note: Note thread safe.
+type EvalOutput struct {
+	// Item is the document after the update expression has been applied.
+	Item map[string]types.AttributeValue
+	// ReturnAttributes contains the attributes to return based on ReturnValues setting.
+	// For NONE: nil
+	// For ALL_OLD: the entire old item
+	// For ALL_NEW: the entire new item
+	// For UPDATED_OLD: only the updated attributes from the old item
+	// For UPDATED_NEW: only the updated attributes from the new item
+	ReturnAttributes map[string]types.AttributeValue
+}
+
+// Apply applies the parsed UpdateExpression to a document, returning the modified document
+// and any return attributes based on the ReturnValues setting.
+// The oldItem parameter is the item before any modifications (can be nil for new items).
+func Apply(expr *ast.UpdateExpression, input EvalInput, oldItem map[string]types.AttributeValue) (*EvalOutput, error) {
+	// Make a copy of the old item to work with
+	doc := make(map[string]types.AttributeValue)
+	for k, v := range oldItem {
+		doc[k] = v
 	}
 
 	// Validate no cross-clause path overlaps
@@ -71,7 +91,94 @@ func Apply(expr *ast.UpdateExpression, input EvalInput, doc map[string]types.Att
 		}
 	}
 
-	return doc, nil
+	// Compute return attributes based on ReturnValues setting
+	var returnAttrs map[string]types.AttributeValue
+	switch input.ReturnValues {
+	case types.ReturnValueAllOld:
+		returnAttrs = oldItem
+	case types.ReturnValueAllNew:
+		returnAttrs = doc
+	case types.ReturnValueUpdatedOld:
+		returnAttrs = extractUpdatedAttributes(expr, input.ExpressionNames, oldItem)
+	case types.ReturnValueUpdatedNew:
+		returnAttrs = extractUpdatedAttributes(expr, input.ExpressionNames, doc)
+	}
+
+	return &EvalOutput{
+		Item:             doc,
+		ReturnAttributes: returnAttrs,
+	}, nil
+}
+
+// extractUpdatedAttributes returns only the top-level attributes that were modified.
+// DynamoDB returns the entire top-level attribute, not just the nested path that changed.
+func extractUpdatedAttributes(expr *ast.UpdateExpression, names map[string]string, item map[string]types.AttributeValue) map[string]types.AttributeValue {
+	if item == nil {
+		return nil
+	}
+
+	// Collect all top-level attribute names that were touched
+	touched := make(map[string]struct{})
+
+	for _, action := range expr.SetActions {
+		if name := getTopLevelName(action.Path, names); name != "" {
+			touched[name] = struct{}{}
+		}
+	}
+	for _, action := range expr.RemoveActions {
+		if name := getTopLevelName(action.Path, names); name != "" {
+			touched[name] = struct{}{}
+		}
+	}
+	for _, action := range expr.AddActions {
+		if name := getTopLevelName(action.Path, names); name != "" {
+			touched[name] = struct{}{}
+		}
+	}
+	for _, action := range expr.DeleteActions {
+		if name := getTopLevelName(action.Path, names); name != "" {
+			touched[name] = struct{}{}
+		}
+	}
+
+	// Extract values for touched attributes
+	result := make(map[string]types.AttributeValue)
+	for name := range touched {
+		if val, ok := item[name]; ok {
+			result[name] = val
+		}
+	}
+	return result
+}
+
+// getTopLevelName returns the top-level attribute name from a path.
+func getTopLevelName(path *ast.AttributePath, names map[string]string) string {
+	if len(path.Parts) > 0 && path.Parts[0].Identifier != nil {
+		return path.Parts[0].Identifier.GetName(names)
+	}
+	return ""
+}
+
+// Update parses and applies an update expression in one step.
+// This is a convenience function for when you don't need to reuse the parsed expression.
+func Update(updateExpr string, input EvalInput, oldItem map[string]types.AttributeValue) (*EvalOutput, error) {
+	expr, err := Parse(updateExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse update expression: %w", err)
+	}
+	return Apply(expr, input, oldItem)
+}
+
+// UpdateFromParams is a convenience function that extracts parameters from UpdateItemInput.
+func UpdateFromParams(params *dynamodb.UpdateItemInput, oldItem map[string]types.AttributeValue) (*EvalOutput, error) {
+	if params.UpdateExpression == nil {
+		return nil, fmt.Errorf("UpdateExpression is required")
+	}
+	return Update(*params.UpdateExpression, EvalInput{
+		ExpressionNames:  params.ExpressionAttributeNames,
+		ExpressionValues: params.ExpressionAttributeValues,
+		ReturnValues:     params.ReturnValues,
+	}, oldItem)
 }
 
 func evaluateSetValue(v ast.SetValue, input EvalInput, doc map[string]types.AttributeValue) (types.AttributeValue, error) {
