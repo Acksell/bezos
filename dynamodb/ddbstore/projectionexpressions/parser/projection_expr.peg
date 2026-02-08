@@ -1,0 +1,83 @@
+{
+  package parser
+
+  import (
+    "strings"
+
+    "bezos/dynamodb/ddbstore/projectionexpressions/ast"
+    "bezos/dynamodb/ddbstore/astutil"
+  )
+}
+
+// ProjectionExpression grammar for DynamoDB
+// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ProjectionExpressions.html
+//
+// A projection expression is a comma-separated list of attribute paths.
+// Each path can include:
+//   - Simple attribute names: "title"
+//   - Nested attributes: "info.rating"
+//   - List elements: "authors[0]"
+//   - Expression attribute names: "#yr"
+
+Start
+  = _ expr:ProjectionExpression _ !. {
+      return expr, nil
+    }
+
+ProjectionExpression
+  = head:PathExpression tail:(_ ',' _ path:PathExpression { return path, nil })* {
+      return ast.NewProjectionExpression(head, tail), nil
+    }
+
+PathExpression
+  = head:Identifier tail:(
+      _ '[' _ idx:[0-9]+ _ ']' {
+        return astutil.Atoi(strings.Trim(string(c.text), "[]")), nil
+      }
+    / _ '.' _ prop:Identifier {
+        return prop, nil
+      }
+    )* {
+      return ast.NewAttributePath(head, tail), nil
+    }
+
+Identifier
+  = !ReservedWord head:IdentifierStart tail:IdentifierPart* {
+      return astutil.HeadTailString(head, tail), nil
+    }
+  / ExpressionAttributeName
+
+ExpressionAttributeName
+  = !ReservedWord head:"#" tail:IdentifierPart* {
+      return ast.NewExpressionAttributeName(string(c.text)), nil
+    }
+
+IdentifierStart
+  = [a-zA-Z]
+  / "_"
+
+IdentifierPart
+  = IdentifierStart
+  / [0-9]
+
+AttributePart
+  = IdentifierPart
+  / "#"
+  / ":"
+
+// Reserved words that cannot be used as identifiers without expression attribute names
+ReservedWord
+  = BetweenToken
+  / InToken
+  / AndToken
+  / OrToken
+  / NotToken
+
+BetweenToken = "BETWEEN"i !AttributePart
+InToken = "IN"i !AttributePart
+AndToken = "AND"i !AttributePart
+OrToken = "OR"i !AttributePart
+NotToken = "NOT"i !AttributePart
+
+_ "whitespace"
+  = [ \t\r\n]*
