@@ -1,14 +1,15 @@
-package writeconditions
+package conditionexpressions
 
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/ast"
-	"github.com/acksell/bezos/dynamodb/ddbstore/writeconditions/parser"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions/ast"
+	"github.com/acksell/bezos/dynamodb/ddbstore/conditionexpressions/parser"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+// Can parse both filterexpressions and conditions for writes
 func Parse(condition string) (ast.Condition, error) {
 	return parser.ParseExpr(condition)
 }

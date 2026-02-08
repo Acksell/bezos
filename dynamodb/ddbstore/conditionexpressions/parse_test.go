@@ -1,4 +1,4 @@
-package writeconditions
+package conditionexpressions
 
 import (
 	"fmt"

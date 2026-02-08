@@ -103,7 +103,7 @@ func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
 		IndexName:                 q.opts.indexName,
 		KeyConditionExpression:    expr.KeyCondition(),
 		FilterExpression:          expr.Filter(),
-		ProjectionExpression:      expr.Projection(), // todo implement
+		ProjectionExpression:      expr.Projection(),
 		ExpressionAttributeValues: expr.Values(),
 		ExpressionAttributeNames:  expr.Names(),
 		ConsistentRead:            ptr(!q.opts.eventuallyConsistent),
