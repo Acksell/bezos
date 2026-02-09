@@ -63,7 +63,8 @@ type Writer interface {
 }
 
 type Txer interface {
-	AddAction(context.Context, Action) error
+	// todo remove error from this, and catch error in Commit()
+	AddAction(Action) error
 	Commit(context.Context) error
 }
 

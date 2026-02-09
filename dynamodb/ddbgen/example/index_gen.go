@@ -4,6 +4,7 @@ package example
 
 import (
 	"fmt"
+
 	"github.com/acksell/bezos/dynamodb/ddbsdk"
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/table"
@@ -13,16 +14,16 @@ import (
 // User Index Wrapper
 // =============================================================================
 
-// UserIndexType wraps the PrimaryIndex with strongly-typed methods.
-type UserIndexType struct {
-	index.PrimaryIndex
+// UserIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type UserIndexUtil struct {
+	*index.PrimaryIndex[User]
 }
 
 // UserIndex is the typed wrapper for User operations.
-var UserIndex = UserIndexType{PrimaryIndex: *userIndex}
+var UserIndex = UserIndexUtil{PrimaryIndex: &userIndex}
 
 // PrimaryKey creates a strongly-typed primary key from explicit parameters.
-func (idx UserIndexType) PrimaryKey(id string) table.PrimaryKey {
+func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
@@ -33,7 +34,7 @@ func (idx UserIndexType) PrimaryKey(id string) table.PrimaryKey {
 }
 
 // PrimaryKeyFrom extracts the primary key from a User entity.
-func (idx UserIndexType) PrimaryKeyFrom(e *User) table.PrimaryKey {
+func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
@@ -44,27 +45,26 @@ func (idx UserIndexType) PrimaryKeyFrom(e *User) table.PrimaryKey {
 }
 
 // NewUnsafePut creates a Put operation without optimistic locking.
-func (idx UserIndexType) NewUnsafePut(e *User) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.PrimaryIndex, idx.PrimaryKeyFrom(e), e)
+func (idx UserIndexUtil) NewUnsafePut(e *User) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
 }
 
 // NewDelete creates a Delete operation.
-func (idx UserIndexType) NewDelete(id string) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.PrimaryIndex, idx.PrimaryKey(id))
+func (idx UserIndexUtil) NewDelete(id string) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(id))
 }
 
 // NewUnsafeUpdate creates an Update operation without optimistic locking.
-func (idx UserIndexType) NewUnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.PrimaryIndex, idx.PrimaryKey(id))
+func (idx UserIndexUtil) NewUnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(id))
 }
 
 // ByEmailKey creates a key for querying the ByEmail GSI.
-func (idx UserIndexType) ByEmailKey(email string, id string) table.PrimaryKey {
+func (idx UserIndexUtil) ByEmailKey() table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("EMAIL#%s", email),
-			SortKey:      fmt.Sprintf("USER#%s", id),
+			PartitionKey: "",
 		},
 	}
 }
@@ -73,16 +73,16 @@ func (idx UserIndexType) ByEmailKey(email string, id string) table.PrimaryKey {
 // Order Index Wrapper
 // =============================================================================
 
-// OrderIndexType wraps the PrimaryIndex with strongly-typed methods.
-type OrderIndexType struct {
-	index.PrimaryIndex
+// OrderIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type OrderIndexUtil struct {
+	*index.PrimaryIndex[Order]
 }
 
 // OrderIndex is the typed wrapper for Order operations.
-var OrderIndex = OrderIndexType{PrimaryIndex: *orderIndex}
+var OrderIndex = OrderIndexUtil{PrimaryIndex: &orderIndex}
 
 // PrimaryKey creates a strongly-typed primary key from explicit parameters.
-func (idx OrderIndexType) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
+func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
@@ -93,7 +93,7 @@ func (idx OrderIndexType) PrimaryKey(tenantID string, orderID string) table.Prim
 }
 
 // PrimaryKeyFrom extracts the primary key from a Order entity.
-func (idx OrderIndexType) PrimaryKeyFrom(e *Order) table.PrimaryKey {
+func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
@@ -104,16 +104,16 @@ func (idx OrderIndexType) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 }
 
 // NewUnsafePut creates a Put operation without optimistic locking.
-func (idx OrderIndexType) NewUnsafePut(e *Order) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.PrimaryIndex, idx.PrimaryKeyFrom(e), e)
+func (idx OrderIndexUtil) NewUnsafePut(e *Order) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
 }
 
 // NewDelete creates a Delete operation.
-func (idx OrderIndexType) NewDelete(tenantID string, orderID string) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.PrimaryIndex, idx.PrimaryKey(tenantID, orderID))
+func (idx OrderIndexUtil) NewDelete(tenantID string, orderID string) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(tenantID, orderID))
 }
 
 // NewUnsafeUpdate creates an Update operation without optimistic locking.
-func (idx OrderIndexType) NewUnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.PrimaryIndex, idx.PrimaryKey(tenantID, orderID))
+func (idx OrderIndexUtil) NewUnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(tenantID, orderID))
 }

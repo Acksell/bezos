@@ -5,149 +5,191 @@ import (
 
 	"github.com/acksell/bezos/dynamodb/index/keys"
 	"github.com/acksell/bezos/dynamodb/table"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func TestSecondaryIndex_ExtractKeys(t *testing.T) {
-	gsi := SecondaryIndex{
-		Name: "gsi1",
-		PartitionKey: keys.Key{
-			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("EMAIL#%s", keys.Field("email")),
+type TestEntity struct {
+	ID    string `dynamodbav:"id"`
+	Email string `dynamodbav:"email"`
+}
+
+func TestPrimaryIndex_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		idx     PrimaryIndex[TestEntity]
+		wantErr bool
+	}{
+		{
+			name: "valid index with sort key",
+			idx: PrimaryIndex[TestEntity]{
+				Table: table.TableDefinition{
+					Name: "TestTable",
+					KeyDefinitions: table.PrimaryKeyDefinition{
+						PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+						SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+					},
+				},
+				PartitionKey: keys.Fmt("USER#{id}"),
+				SortKey:      keys.Fmt("PROFILE").Ptr(),
+			},
+			wantErr: false,
 		},
-		SortKey: &keys.Key{
-			Def:       table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("USER#%s", keys.Field("userID")),
+		{
+			name: "valid index without sort key",
+			idx: PrimaryIndex[TestEntity]{
+				Table: table.TableDefinition{
+					Name: "TestTable",
+					KeyDefinitions: table.PrimaryKeyDefinition{
+						PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+					},
+				},
+				PartitionKey: keys.Fmt("USER#{id}"),
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing table name",
+			idx: PrimaryIndex[TestEntity]{
+				PartitionKey: keys.Fmt("USER#{id}"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing partition key",
+			idx: PrimaryIndex[TestEntity]{
+				Table: table.TableDefinition{Name: "TestTable"},
+			},
+			wantErr: true,
 		},
 	}
 
-	item := map[string]types.AttributeValue{
-		"userID": &types.AttributeValueMemberS{Value: "123"},
-		"email":  &types.AttributeValueMemberS{Value: "test@example.com"},
-		"name":   &types.AttributeValueMemberS{Value: "Test User"},
-	}
-
-	gsiKeys, err := gsi.ExtractKeys(item)
-	if err != nil {
-		t.Fatalf("ExtractKeys() error = %v", err)
-	}
-
-	if len(gsiKeys) != 2 {
-		t.Errorf("ExtractKeys() returned %d keys, want 2", len(gsiKeys))
-	}
-
-	pk, ok := gsiKeys["gsi1pk"].(*types.AttributeValueMemberS)
-	if !ok || pk.Value != "EMAIL#test@example.com" {
-		t.Errorf("gsi1pk = %v, want EMAIL#test@example.com", gsiKeys["gsi1pk"])
-	}
-
-	sk, ok := gsiKeys["gsi1sk"].(*types.AttributeValueMemberS)
-	if !ok || sk.Value != "USER#123" {
-		t.Errorf("gsi1sk = %v, want USER#123", gsiKeys["gsi1sk"])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.idx.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestSecondaryIndex_SparseIndex(t *testing.T) {
-	gsi := SecondaryIndex{
-		Name: "gsi1",
-		PartitionKey: keys.Key{
-			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("EMAIL#%s", keys.Field("email")),
-		},
-		SortKey: &keys.Key{
-			Def:       table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("USER#%s", keys.Field("userID")),
-		},
+func TestPrimaryIndex_TableName(t *testing.T) {
+	idx := PrimaryIndex[TestEntity]{
+		Table: table.TableDefinition{Name: "MyTable"},
 	}
-
-	// Item missing the email field - should return nil (sparse GSI behavior)
-	item := map[string]types.AttributeValue{
-		"userID": &types.AttributeValueMemberS{Value: "123"},
-		"name":   &types.AttributeValueMemberS{Value: "Test User"},
-	}
-
-	gsiKeys, err := gsi.ExtractKeys(item)
-	if err != nil {
-		t.Fatalf("ExtractKeys() error = %v", err)
-	}
-
-	if gsiKeys != nil {
-		t.Errorf("ExtractKeys() = %v, want nil for sparse GSI", gsiKeys)
+	if got := idx.TableName(); got != "MyTable" {
+		t.Errorf("TableName() = %q, want %q", got, "MyTable")
 	}
 }
 
-func TestPrimaryIndex_ExtractAllGSIKeys(t *testing.T) {
-	tbl := table.TableDefinition{
-		Name: "TestTable",
-		KeyDefinitions: table.PrimaryKeyDefinition{
-			PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
-			SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+func TestSecondaryIndex_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		gsi     SecondaryIndex
+		wantErr bool
+	}{
+		{
+			name: "valid GSI",
+			gsi: SecondaryIndex{
+				Name: "ByEmail",
+				Partition: KeyValDef{
+					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+					ValDef: keys.Fmt("EMAIL#{email}"),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid GSI with sort key",
+			gsi: SecondaryIndex{
+				Name: "ByEmail",
+				Partition: KeyValDef{
+					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+					ValDef: keys.Fmt("EMAIL#{email}"),
+				},
+				Sort: &KeyValDef{
+					KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+					ValDef: keys.Fmt("USER#{id}"),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name:    "missing name",
+			gsi:     SecondaryIndex{},
+			wantErr: true,
+		},
+		{
+			name: "missing partition key def name",
+			gsi: SecondaryIndex{
+				Name: "ByEmail",
+				Partition: KeyValDef{
+					ValDef: keys.Fmt("EMAIL#{email}"),
+				},
+			},
+			wantErr: true,
 		},
 	}
 
-	gsi1 := SecondaryIndex{
-		Name: "gsi1",
-		PartitionKey: keys.Key{
-			Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("EMAIL#%s", keys.Field("email")),
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.gsi.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSecondaryIndex_KeyDefinition(t *testing.T) {
+	gsi := SecondaryIndex{
+		Name: "ByEmail",
+		Partition: KeyValDef{
+			KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+			ValDef: keys.Fmt("EMAIL#{email}"),
 		},
-		SortKey: &keys.Key{
-			Def:       table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-			Extractor: keys.Const("USER"),
+		Sort: &KeyValDef{
+			KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindN},
+			ValDef: keys.FromField("timestamp"),
 		},
 	}
 
-	gsi2 := SecondaryIndex{
-		Name: "gsi2",
-		PartitionKey: keys.Key{
-			Def:       table.KeyDef{Name: "gsi2pk", Kind: table.KeyKindS},
-			Extractor: keys.Fmt("STATUS#%s", keys.Field("status")),
+	keyDef := gsi.KeyDefinition()
+	if keyDef.PartitionKey.Name != "gsi1pk" {
+		t.Errorf("PartitionKey.Name = %q, want %q", keyDef.PartitionKey.Name, "gsi1pk")
+	}
+	if keyDef.SortKey.Name != "gsi1sk" {
+		t.Errorf("SortKey.Name = %q, want %q", keyDef.SortKey.Name, "gsi1sk")
+	}
+	if keyDef.SortKey.Kind != table.KeyKindN {
+		t.Errorf("SortKey.Kind = %q, want %q", keyDef.SortKey.Kind, table.KeyKindN)
+	}
+}
+
+func TestSecondaryIndex_ToTableDefinition(t *testing.T) {
+	parentTable := table.TableDefinition{
+		Name:          "Users",
+		TimeToLiveKey: "ttl",
+	}
+
+	gsi := SecondaryIndex{
+		Name: "ByEmail",
+		Partition: KeyValDef{
+			KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+			ValDef: keys.Fmt("EMAIL#{email}"),
 		},
-		SortKey: &keys.Key{
-			Def:       table.KeyDef{Name: "gsi2sk", Kind: table.KeyKindS},
-			Extractor: keys.Field("createdAt"),
-		},
 	}
 
-	idx := PrimaryIndex{
-		Table:        tbl,
-		PartitionKey: keys.Fmt("USER#%s", keys.Field("userID")),
-		SortKey:      keys.Const("PROFILE"),
-		Secondary:    []SecondaryIndex{gsi1, gsi2},
+	tableDef := gsi.ToTableDefinition(parentTable)
+	if tableDef.Name != "Users" {
+		t.Errorf("Name = %q, want %q", tableDef.Name, "Users")
 	}
-
-	item := map[string]types.AttributeValue{
-		"userID":    &types.AttributeValueMemberS{Value: "123"},
-		"email":     &types.AttributeValueMemberS{Value: "test@example.com"},
-		"status":    &types.AttributeValueMemberS{Value: "active"},
-		"createdAt": &types.AttributeValueMemberS{Value: "2024-01-01"},
+	if !tableDef.IsGSI {
+		t.Error("IsGSI should be true")
 	}
-
-	gsiKeys, err := idx.ExtractAllGSIKeys(item)
-	if err != nil {
-		t.Fatalf("ExtractAllGSIKeys() error = %v", err)
+	if tableDef.TimeToLiveKey != "ttl" {
+		t.Errorf("TimeToLiveKey = %q, want %q", tableDef.TimeToLiveKey, "ttl")
 	}
-
-	// Should have 4 keys: gsi1pk, gsi1sk, gsi2pk, gsi2sk
-	if len(gsiKeys) != 4 {
-		t.Errorf("ExtractAllGSIKeys() returned %d keys, want 4", len(gsiKeys))
-	}
-
-	expectedKeys := map[string]string{
-		"gsi1pk": "EMAIL#test@example.com",
-		"gsi1sk": "USER",
-		"gsi2pk": "STATUS#active",
-		"gsi2sk": "2024-01-01",
-	}
-
-	for name, want := range expectedKeys {
-		got, ok := gsiKeys[name].(*types.AttributeValueMemberS)
-		if !ok {
-			t.Errorf("key %q missing or wrong type", name)
-			continue
-		}
-		if got.Value != want {
-			t.Errorf("key %q = %q, want %q", name, got.Value, want)
-		}
+	if tableDef.KeyDefinitions.PartitionKey.Name != "gsi1pk" {
+		t.Errorf("KeyDefinitions.PartitionKey.Name = %q, want %q", tableDef.KeyDefinitions.PartitionKey.Name, "gsi1pk")
 	}
 }

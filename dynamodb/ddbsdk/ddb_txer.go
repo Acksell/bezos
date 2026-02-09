@@ -41,7 +41,7 @@ func (tx *txer) Start(ctx context.Context, opts ...TxOption) {
 	tx.stackCounter++
 }
 
-func (tx *txer) AddAction(ctx context.Context, a Action) error {
+func (tx *txer) AddAction(a Action) error {
 	if _, found := tx.actions[a.PrimaryKey()]; found {
 		//todo TEST this
 		return fmt.Errorf("an action already exists for primary key: %v", a.PrimaryKey())

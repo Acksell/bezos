@@ -1,13 +1,12 @@
 // Package example demonstrates how to use ddbgen with index definitions.
 //
-// This file defines the indexes using ddbgen.BindIndex() for code generation.
-// Run the generator in cmd/generate to produce keys_gen.go.
+// Define indexes using PrimaryIndex with type parameters and string patterns.
+// Run the generator to produce type-safe key constructors:
 //
-//go:generate go run ./cmd/generate
+//go:generate go run github.com/acksell/bezos/dynamodb/ddbgen/cmd/ddbgen
 package example
 
 import (
-	"github.com/acksell/bezos/dynamodb/ddbgen"
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/index/keys"
 	"github.com/acksell/bezos/dynamodb/table"
@@ -21,24 +20,28 @@ var UserTable = table.TableDefinition{
 	},
 }
 
-var userIndex = ddbgen.BindIndex(User{}, index.PrimaryIndex{
+var userIndex = index.PrimaryIndex[User]{
 	Table:        UserTable,
-	PartitionKey: keys.Fmt("USER#%s", keys.Field("id")),
-	SortKey:      keys.Const("PROFILE"),
+	PartitionKey: keys.Fmt("USER#{id}"),
+	SortKey:      keys.Fmt("PROFILE").Ptr(),
+	// todo do we even need secondary indexes?
+	// Can't we just use GSI table definition directly?
+	// What is a primaryindex on a GSI?
+	// Is this just a way for extracting GSI keys? Do we need that?
 	Secondary: []index.SecondaryIndex{
 		{
 			Name: "ByEmail",
-			PartitionKey: keys.Key{
-				Def:       table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-				Extractor: keys.Fmt("EMAIL#%s", keys.Field("email")),
+			Partition: index.KeyValDef{
+				KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+				ValDef: keys.Fmt("EMAIL#{email}"),
 			},
-			SortKey: &keys.Key{
-				Def:       table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-				Extractor: keys.Fmt("USER#%s", keys.Field("id")),
+			Sort: &index.KeyValDef{
+				KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+				ValDef: keys.Fmt("USER#{id}"),
 			},
 		},
 	},
-})
+}
 
 var OrderTable = table.TableDefinition{
 	Name: "orders",
@@ -48,8 +51,8 @@ var OrderTable = table.TableDefinition{
 	},
 }
 
-var orderIndex = ddbgen.BindIndex(Order{}, index.PrimaryIndex{
+var orderIndex = index.PrimaryIndex[Order]{
 	Table:        OrderTable,
-	PartitionKey: keys.Fmt("TENANT#%s", keys.Field("tenantID")),
-	SortKey:      keys.Fmt("ORDER#%s", keys.Field("orderID")),
-})
+	PartitionKey: keys.Fmt("TENANT#{tenantID}"),
+	SortKey:      keys.Fmt("ORDER#{orderID}").Ptr(),
+}
