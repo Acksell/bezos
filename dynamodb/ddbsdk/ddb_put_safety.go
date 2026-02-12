@@ -17,10 +17,12 @@ type VersionedDynamoEntity interface {
 	Version() (string, any)
 }
 
-// Put with optimistic locking
+// Put with optimistic locking:
+// Fails if there already exists an item with a version
+// greater than or equal to provided entity's version
 func NewSafePut(table table.TableDefinition, key table.PrimaryKey, e VersionedDynamoEntity) *Put {
 	versionField, version := e.Version()
 	return newPut(table, key, e).WithCondition(
-		expression.Equal(expression.Name(versionField), expression.Value(version)).
+		expression.LessThan(expression.Name(versionField), expression.Value(version)).
 			Or(expression.AttributeNotExists(expression.Name(versionField))))
 }
