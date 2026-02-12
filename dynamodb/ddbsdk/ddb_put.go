@@ -1,6 +1,7 @@
 package ddbsdk
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -11,6 +12,18 @@ import (
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+func (c *Client) PutItem(ctx context.Context, p *Put) error {
+	put, err := p.ToPutItem()
+	if err != nil {
+		return fmt.Errorf("failed to convert put to put item: %w", err)
+	}
+	_, err = c.awsddb.PutItem(ctx, put)
+	if err != nil {
+		return fmt.Errorf("failed to put item: %w", err)
+	}
+	return nil
+}
 
 // See NewSafePut and NewUnsafePut instead for the public API.
 func newPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {

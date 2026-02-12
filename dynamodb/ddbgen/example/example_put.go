@@ -21,7 +21,6 @@ func main() {
 
 	// Put the user into DynamoDB
 	putOp := UserIndex.NewUnsafePut(user)
-	// TODO add direct DeleteItem operations.
 	if err := db.PutItem(ctx, putOp); err != nil {
 		panic(fmt.Sprintf("failed to put item: %v", err))
 	}
@@ -29,14 +28,12 @@ func main() {
 	// Update the user's name
 	updateOp := UserIndex.NewUnsafeUpdate(user.UserID)
 	updateOp.AddOp(ddbsdk.SetFieldOp("name", "Jane Doe"))
-	// TODO add direct DeleteItem operations.
 	if err := db.UpdateItem(ctx, updateOp); err != nil {
 		panic(fmt.Sprintf("failed to update item: %v", err))
 	}
 
 	// Delete the user
 	deleteOp := UserIndex.NewDelete(user.UserID)
-	// TODO add direct DeleteItem operations.
 	if err := db.DeleteItem(ctx, deleteOp); err != nil {
 		panic(fmt.Sprintf("failed to delete item: %v", err))
 	}
@@ -52,9 +49,8 @@ func main() {
 	}
 
 	// query
-	emailKey := UserIndex.ByEmailKey()
 	db.NewQuery(UserIndex.Table, ddbsdk.NewKeyCondition(
-		emailKey,
+		UserIndex.ByEmailKey(),
 		ddbsdk.Equals("admin@example.com")))
 
 }

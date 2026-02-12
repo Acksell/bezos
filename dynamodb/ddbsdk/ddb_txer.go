@@ -2,6 +2,7 @@ package ddbsdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/acksell/bezos/dynamodb/table"
@@ -27,6 +28,7 @@ type txer struct {
 	opts txOpts
 
 	actions map[table.PrimaryKey]Action
+	errs    []error // errors from AddAction, checked in Commit
 
 	// once stackCounter goes from 1 to 0, the transaction is committed to database.
 	// incremented on Start(), decremented on Commit()
@@ -41,18 +43,20 @@ func (tx *txer) Start(ctx context.Context, opts ...TxOption) {
 	tx.stackCounter++
 }
 
-func (tx *txer) AddAction(a Action) error {
+func (tx *txer) AddAction(a Action) {
 	if _, found := tx.actions[a.PrimaryKey()]; found {
-		//todo TEST this
-		return fmt.Errorf("an action already exists for primary key: %v", a.PrimaryKey())
+		tx.errs = append(tx.errs, fmt.Errorf("an action already exists for primary key: %v", a.PrimaryKey()))
+		return
 	}
 	tx.actions[a.PrimaryKey()] = a
-	return nil
 }
 
 // If a transaction already started in this context, commit in this context does nothing, since it's not the outer-most transaction.
 // todo: add return value
 func (tx *txer) Commit(ctx context.Context) error {
+	if len(tx.errs) > 0 {
+		return errors.Join(tx.errs...)
+	}
 	tx.stackCounter--
 	if tx.stackCounter < 0 {
 		return fmt.Errorf("too many commits, no started transaction")

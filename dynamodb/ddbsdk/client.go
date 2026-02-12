@@ -60,11 +60,14 @@ type IO interface {
 type Writer interface {
 	NewTx(...TxOption) Txer
 	NewBatch(...BatchOption) Batcher
+
+	PutItem(context.Context, *Put) error
+	UpdateItem(context.Context, *UnsafeUpdate) error
+	DeleteItem(context.Context, *Delete) error
 }
 
 type Txer interface {
-	// todo remove error from this, and catch error in Commit()
-	AddAction(Action) error
+	AddAction(Action)
 	Commit(context.Context) error
 }
 

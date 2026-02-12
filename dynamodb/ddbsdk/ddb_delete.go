@@ -1,6 +1,7 @@
 package ddbsdk
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/acksell/bezos/dynamodb/table"
@@ -9,6 +10,18 @@ import (
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
+
+func (c *Client) DeleteItem(ctx context.Context, d *Delete) error {
+	del, err := d.ToDeleteItem()
+	if err != nil {
+		return fmt.Errorf("failed to convert delete to delete item: %w", err)
+	}
+	_, err = c.awsddb.DeleteItem(ctx, del)
+	if err != nil {
+		return fmt.Errorf("failed to delete item: %w", err)
+	}
+	return nil
+}
 
 func NewDelete(table table.TableDefinition, pk table.PrimaryKey) *Delete {
 	return &Delete{
