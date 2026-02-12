@@ -21,7 +21,7 @@ type Put struct {
 
 	ttlExpiry *time.Time
 
-	c expression2.ConditionBuilder
+	c *expression2.ConditionBuilder
 }
 
 // UnsafeUpdate is called unsafe because it does not require the user to
@@ -36,12 +36,12 @@ type UnsafeUpdate struct {
 	allowNonIdempotent bool
 
 	u expression2.UpdateBuilder
-	c expression2.ConditionBuilder
+	c *expression2.ConditionBuilder
 }
 
 type Delete struct {
 	Table table.TableDefinition
 	Key   table.PrimaryKey
 
-	c expression2.ConditionBuilder
+	c *expression2.ConditionBuilder
 }

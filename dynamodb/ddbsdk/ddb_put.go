@@ -48,7 +48,12 @@ func (p *Put) WithTTL(expiry time.Time) *Put {
 }
 
 func (p *Put) WithCondition(c expression2.ConditionBuilder) *Put {
-	p.c = p.c.And(c)
+	if p.c == nil {
+		p.c = &c
+	} else {
+		merged := p.c.And(c)
+		p.c = &merged
+	}
 	return p
 }
 
@@ -58,7 +63,9 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 		return expression2.Expression{}, nil, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
 	}
 	b := expression2.NewBuilder()
-	b.WithCondition(p.c)
+	if p.c != nil {
+		b = b.WithCondition(*p.c)
+	}
 	if p.ttlExpiry != nil {
 		entity[p.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
 	}

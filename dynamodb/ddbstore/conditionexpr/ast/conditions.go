@@ -25,8 +25,9 @@ type Condition interface {
 
 // Expression is an interface for that is used as operands in comparisons and function calls.
 type Expression interface {
-	// GetValue returns an operand to be used in conditions
-	GetValue(input Input, doc map[string]AttributeValue) *Operand
+	// GetValue returns an operand to be used in conditions.
+	// The bool indicates whether the value exists/could be resolved.
+	GetValue(input Input, doc map[string]AttributeValue) (*Operand, bool)
 
 	// Traverse(visitor Visitor, input Input)
 }
@@ -127,8 +128,14 @@ const (
 )
 
 func (c *Comparison) Eval(input Input, doc map[string]AttributeValue) bool {
-	leftVal := c.Left.GetValue(input, doc)
-	rightVal := c.Right.GetValue(input, doc)
+	leftVal, leftOk := c.Left.GetValue(input, doc)
+	if !leftOk {
+		return false // attribute doesn't exist, condition fails
+	}
+	rightVal, rightOk := c.Right.GetValue(input, doc)
+	if !rightOk {
+		return false // attribute doesn't exist, condition fails
+	}
 
 	switch c.Operator {
 	case Equal:
@@ -156,12 +163,21 @@ func NewBetweenExpr(val, low, high any) *BetweenExpr {
 }
 
 func (b *BetweenExpr) Eval(input Input, doc map[string]AttributeValue) bool {
-	lo := b.Low.GetValue(input, doc)
-	hi := b.High.GetValue(input, doc)
+	lo, loOk := b.Low.GetValue(input, doc)
+	if !loOk {
+		return false
+	}
+	hi, hiOk := b.High.GetValue(input, doc)
+	if !hiOk {
+		return false
+	}
 	if lo.GreaterThan(hi) {
 		panic(fmt.Sprintf("low must be less than or equal to high: got %v > %v", b.Low, b.High))
 	}
-	val := b.Val.GetValue(input, doc)
+	val, valOk := b.Val.GetValue(input, doc)
+	if !valOk {
+		return false
+	}
 	return val.GreaterThanOrEqual(lo) && val.LessThanOrEqual(hi)
 }
 
@@ -178,9 +194,13 @@ func NewContainsExpr(container, val any) *ContainsExpr {
 }
 
 func (c *ContainsExpr) Eval(input Input, doc map[string]AttributeValue) bool {
-	val := c.Val.GetValue(input, doc)
+	val, valOk := c.Val.GetValue(input, doc)
+	if !valOk {
+		return false
+	}
 	for _, item := range c.Container {
-		if item.GetValue(input, doc) == val {
+		itemVal, itemOk := item.GetValue(input, doc)
+		if itemOk && itemVal == val {
 			return true
 		}
 	}
@@ -258,12 +278,12 @@ type AttributePath struct {
 }
 
 // Ensure AttributePath implements Expression
-func (p *AttributePath) GetValue(input Input, doc map[string]AttributeValue) *Operand {
+func (p *AttributePath) GetValue(input Input, doc map[string]AttributeValue) (*Operand, bool) {
 	v, exists := resolvePath(p.Parts, input, doc)
 	if !exists {
-		panic(fmt.Sprintf("attribute %s not found", FullPath(p.Parts, input)))
+		return nil, false
 	}
-	return &Operand{Value: v.Value, Type: v.Type}
+	return &Operand{Value: v.Value, Type: v.Type}, true
 }
 
 // only for debugging
@@ -416,26 +436,26 @@ func NewFunctionCallExpr(namev, argsv any) *FunctionCall {
 // and name!="size" can only be used in Eval.
 // This is done instead of an explicit grammar
 // for more custom error messages.
-func (f *FunctionCall) GetValue(input Input, doc map[string]AttributeValue) *Operand {
+func (f *FunctionCall) GetValue(input Input, doc map[string]AttributeValue) (*Operand, bool) {
 	switch f.FunctionName {
 	case "size":
 		path := astutil.CastTo[*AttributePath](f.Args[0], "size first arg")
 		// path
 		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
-			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
+			return nil, false
 		}
 		switch attr.Type {
 		case STRING:
-			return &Operand{len(attr.Value.(string)), NUMBER}
+			return &Operand{len(attr.Value.(string)), NUMBER}, true
 		case NUMBER:
 			panic("size function not supported for number")
 		case LIST, NUMBER_SET, STRING_SET, BINARY_SET:
-			return &Operand{len(attr.Value.([]any)), NUMBER}
+			return &Operand{len(attr.Value.([]any)), NUMBER}, true
 		case MAP:
-			return &Operand{len(attr.Value.(map[string]any)), NUMBER}
+			return &Operand{len(attr.Value.(map[string]any)), NUMBER}, true
 		case BINARY:
-			return &Operand{len(attr.Value.([]byte)), NUMBER}
+			return &Operand{len(attr.Value.([]byte)), NUMBER}, true
 		default:
 			panic(fmt.Sprintf("unsupported attribute type %s", attr.Type))
 		}
@@ -455,25 +475,34 @@ func (f *FunctionCall) Eval(input Input, doc map[string]AttributeValue) bool {
 		path := astutil.CastTo[*AttributePath](f.Args[0], "begins_with first arg")
 		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
-			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
+			return false
 		}
 		strVal := astutil.String(attr.Value)
-		prefix := astutil.String(f.Args[1])
-		return startsWith(strVal, prefix)
+		prefix, ok := f.Args[1].GetValue(input, doc)
+		if !ok {
+			return false
+		}
+		return startsWith(strVal, astutil.String(prefix.Value))
 	case "attribute_type":
 		path := astutil.CastTo[*AttributePath](f.Args[0], "attribute_type first arg")
 		attr, exists := resolvePath(path.Parts, input, doc)
 		if !exists {
-			panic(fmt.Sprintf("attribute %s not found", FullPath(path.Parts, input)))
+			return false
 		}
-		typ := f.Args[1].GetValue(input, doc).Value
-		return string(attr.Type) == typ
+		typ, ok := f.Args[1].GetValue(input, doc)
+		if !ok {
+			return false
+		}
+		return string(attr.Type) == typ.Value
 	case "contains":
 		container := astutil.CastTo[*AttributePath](f.Args[0], "contains first arg")
-		val := f.Args[1].GetValue(input, doc)
+		val, valOk := f.Args[1].GetValue(input, doc)
+		if !valOk {
+			return false
+		}
 		attr, exists := resolvePath(container.Parts, input, doc)
 		if !exists {
-			panic(fmt.Sprintf("attribute %s not found", FullPath(container.Parts, input)))
+			return false
 		}
 		switch attr.Type {
 		case LIST, NUMBER_SET, STRING_SET, BINARY_SET:
@@ -541,10 +570,10 @@ type ExpressionAttributeValue struct {
 	Alias string
 }
 
-func (v *ExpressionAttributeValue) GetValue(input Input, doc map[string]AttributeValue) *Operand {
+func (v *ExpressionAttributeValue) GetValue(input Input, doc map[string]AttributeValue) (*Operand, bool) {
 	val, found := input.ExpressionValues[v.Alias]
 	if !found {
-		panic(fmt.Sprintf("expression attribute value %s not found", v.Alias))
+		return nil, false
 	}
-	return &Operand{Value: val.Value, Type: val.Type}
+	return &Operand{Value: val.Value, Type: val.Type}, true
 }

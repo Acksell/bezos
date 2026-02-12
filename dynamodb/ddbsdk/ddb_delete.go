@@ -39,13 +39,20 @@ func (d *Delete) PrimaryKey() table.PrimaryKey {
 }
 
 func (d *Delete) WithCondition(c expression2.ConditionBuilder) *Delete {
-	d.c = c
+	if d.c == nil {
+		d.c = &c
+	} else {
+		merged := d.c.And(c)
+		d.c = &merged
+	}
 	return d
 }
 
 func (d *Delete) Build() (expression2.Expression, error) {
 	b := expression2.NewBuilder()
-	b.WithCondition(d.c)
+	if d.c != nil {
+		b = b.WithCondition(*d.c)
+	}
 	e, err := b.Build()
 	if err != nil {
 		return expression2.Expression{}, fmt.Errorf("build: %w", err)
