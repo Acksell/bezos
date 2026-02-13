@@ -13,6 +13,14 @@ type Action interface {
 	PrimaryKey() table.PrimaryKey
 }
 
+// BatchAction represents actions that can be used with BatchWriteItem.
+// Only Put and Delete are supported (not UnsafeUpdate).
+// The private batchWritable() method restricts implementations to this package.
+type BatchAction interface {
+	Action
+	batchWritable() // marker method to restrict implementations
+}
+
 type Put struct {
 	Table table.TableDefinition
 	// Index  Index

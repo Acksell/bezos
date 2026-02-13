@@ -10,6 +10,5 @@ func NewMock(defs ...table.TableDefinition) IO {
 	if err != nil {
 		panic(err)
 	}
-	// todo implement projection expressions
 	return New(mock)
 }

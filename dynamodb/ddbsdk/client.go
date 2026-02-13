@@ -72,8 +72,9 @@ type Txer interface {
 }
 
 type Batcher interface {
-	AddAction(context.Context, Action) error
-	Write(context.Context) error
+	AddAction(...BatchAction) error
+	Exec(context.Context) (ExecResult, error)
+	ExecAndRetry(context.Context) error
 }
 
 type Reader interface {

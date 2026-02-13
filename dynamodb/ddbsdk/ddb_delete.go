@@ -88,3 +88,18 @@ func (d *Delete) ToTransactWriteItem() (types.TransactWriteItem, error) {
 		},
 	}, nil
 }
+
+// batchWritable implements BatchAction.
+func (d *Delete) batchWritable() {}
+
+// ToBatchWriteRequest converts the Delete to a WriteRequest for BatchWriteItem.
+func (d *Delete) ToBatchWriteRequest() (types.WriteRequest, error) {
+	if d.c.IsSet() {
+		return types.WriteRequest{}, fmt.Errorf("BatchWriteItem does not support condition expressions; use TransactWriteItems or DeleteItem instead")
+	}
+	return types.WriteRequest{
+		DeleteRequest: &types.DeleteRequest{
+			Key: d.PrimaryKey().DDB(),
+		},
+	}, nil
+}

@@ -108,3 +108,22 @@ func (p *Put) ToTransactWriteItem() (types.TransactWriteItem, error) {
 		},
 	}, nil
 }
+
+// batchWritable implements BatchAction.
+func (p *Put) batchWritable() {}
+
+// ToBatchWriteRequest converts the Put to a WriteRequest for BatchWriteItem.
+func (p *Put) ToBatchWriteRequest() (types.WriteRequest, error) {
+	if p.c.IsSet() {
+		return types.WriteRequest{}, fmt.Errorf("BatchWriteItem does not support condition expressions; use TransactWriteItems or PutItem instead")
+	}
+	_, entity, err := p.Build()
+	if err != nil {
+		return types.WriteRequest{}, fmt.Errorf("failed to build put: %w", err)
+	}
+	return types.WriteRequest{
+		PutRequest: &types.PutRequest{
+			Item: entity,
+		},
+	}, nil
+}
