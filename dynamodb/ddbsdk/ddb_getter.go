@@ -29,16 +29,16 @@ func NewGetter(ddb AWSDynamoClientV2, opts ...GetOption) *getter {
 	return g
 }
 
-// LookupItem identifies an item to retrieve with optional projection.
+// GetItemRequest identifies an item to retrieve with optional projection.
 // Projection is per-item since different items may have different schemas.
-type LookupItem struct {
+type GetItemRequest struct {
 	Table      table.TableDefinition
 	Key        table.PrimaryKey
 	Projection []string // Optional: limits which attributes are returned
 }
 
 // GetItem retrieves a single item from DynamoDB using GetItem.
-func (g *getter) GetItem(ctx context.Context, item LookupItem) (Item, error) {
+func (g *getter) GetItem(ctx context.Context, item GetItemRequest) (Item, error) {
 	input := &dynamodbv2.GetItemInput{
 		TableName:      &item.Table.Name,
 		Key:            item.Key.DDB(),
@@ -65,7 +65,7 @@ func (g *getter) GetItem(ctx context.Context, item LookupItem) (Item, error) {
 // All items are retrieved atomically - either all succeed or all fail.
 // Maximum 100 items per transaction (DynamoDB limit).
 // Each item can have its own projection since items may have different schemas.
-func (g *getter) GetItemsTx(ctx context.Context, items ...LookupItem) ([]Item, error) {
+func (g *getter) GetItemsTx(ctx context.Context, items ...GetItemRequest) ([]Item, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -98,12 +98,7 @@ func (g *getter) GetItemsTx(ctx context.Context, items ...LookupItem) ([]Item, e
 	return extractItemsFromResponses(res.Responses), nil
 }
 
-// GetItemsBatch retrieves multiple items using BatchGetItem.
-// Handles unprocessed keys by retrying automatically.
-// Maximum 100 items per batch (DynamoDB limit).
-// Note: BatchGetItem applies projection per-table, so all items from the same table
-// will use the projection from the first item encountered for that table.
-func (g *getter) GetItemsBatch(ctx context.Context, items ...LookupItem) ([]Item, error) {
+func (g *getter) GetItemsBatch(ctx context.Context, items ...GetItemRequest) ([]Item, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -137,7 +132,7 @@ func (g *getter) GetItemsBatch(ctx context.Context, items ...LookupItem) ([]Item
 	return allItems, nil
 }
 
-func (g *getter) buildBatchRequestItems(items []LookupItem) (map[string]types.KeysAndAttributes, error) {
+func (g *getter) buildBatchRequestItems(items []GetItemRequest) (map[string]types.KeysAndAttributes, error) {
 	requestItems := make(map[string]types.KeysAndAttributes)
 
 	for _, item := range items {
@@ -233,7 +228,7 @@ func extractItemsFromResponses(responses []types.ItemResponse) []Item {
 }
 
 // GetOption configures the getter behavior.
-// Options apply to all getter methods: Lookup, TxLookupMany, and BatchLookupMany.
+// Options apply to all getter methods: GetItem, GetItemsTx, and GetItemsBatch.
 type GetOption func(*getOpts)
 
 type getOpts struct {
@@ -245,7 +240,7 @@ type getOpts struct {
 
 // WithEventuallyConsistentReads enables eventually consistent reads.
 // By default, reads are strongly consistent.
-// Note: This option has no effect on TxLookupMany, which always uses serializable isolation.
+// Note: This option has no effect on GetItemsTx, which always uses serializable isolation.
 func WithEventuallyConsistentReads() GetOption {
 	return func(o *getOpts) {
 		o.eventuallyConsistent = true

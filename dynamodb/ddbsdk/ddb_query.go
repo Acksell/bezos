@@ -31,6 +31,8 @@ type querier struct {
 	opts queryOptions
 }
 
+var _ Querier = &querier{}
+
 type queryOptions struct {
 	// default to consistent reads
 	// because if you don't know what you're doing you may introduce race conditions.

@@ -53,4 +53,8 @@ func main() {
 		UserIndex.ByEmailKey(),
 		ddbsdk.Equals("admin@example.com")))
 
+	batch := db.NewBatch()
+	batch.AddAction(UserIndex.NewUnsafePut(user))
+	batch.AddAction(UserIndex.NewUnsafePut(user))
+	batch.AddAction(UserIndex.NewDelete(user.UserID))
 }

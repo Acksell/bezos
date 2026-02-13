@@ -1,7 +1,6 @@
 package ddbsdk
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -12,18 +11,6 @@ import (
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
-
-func (c *Client) PutItem(ctx context.Context, p *Put) error {
-	put, err := p.ToPutItem()
-	if err != nil {
-		return fmt.Errorf("failed to convert put to put item: %w", err)
-	}
-	_, err = c.awsddb.PutItem(ctx, put)
-	if err != nil {
-		return fmt.Errorf("failed to put item: %w", err)
-	}
-	return nil
-}
 
 // See NewSafePut and NewUnsafePut instead for the public API.
 func newPut(table table.TableDefinition, key table.PrimaryKey, e DynamoEntity) *Put {
@@ -47,13 +34,11 @@ func (p *Put) WithTTL(expiry time.Time) *Put {
 	return p
 }
 
-func (p *Put) WithCondition(c expression2.ConditionBuilder) *Put {
-	if p.c.IsSet() {
-		p.c = p.c.And(c)
-		return p
-	}
+// WithCondition adds a condition expression and returns a PutWithCondition.
+// PutWithCondition cannot be used with BatchWriteItem.
+func (p *Put) WithCondition(c expression2.ConditionBuilder) *PutWithCondition {
 	p.c = c
-	return p
+	return &PutWithCondition{put: p}
 }
 
 func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, error) {
@@ -114,9 +99,6 @@ func (p *Put) batchWritable() {}
 
 // ToBatchWriteRequest converts the Put to a WriteRequest for BatchWriteItem.
 func (p *Put) ToBatchWriteRequest() (types.WriteRequest, error) {
-	if p.c.IsSet() {
-		return types.WriteRequest{}, fmt.Errorf("BatchWriteItem does not support condition expressions; use TransactWriteItems or PutItem instead")
-	}
 	_, entity, err := p.Build()
 	if err != nil {
 		return types.WriteRequest{}, fmt.Errorf("failed to build put: %w", err)
@@ -126,4 +108,41 @@ func (p *Put) ToBatchWriteRequest() (types.WriteRequest, error) {
 			Item: entity,
 		},
 	}, nil
+}
+
+// PutWithCondition methods - delegates to the underlying Put
+
+func (p *PutWithCondition) TableName() *string {
+	return p.put.TableName()
+}
+
+func (p *PutWithCondition) PrimaryKey() table.PrimaryKey {
+	return p.put.PrimaryKey()
+}
+
+func (p *PutWithCondition) WithTTL(expiry time.Time) *PutWithCondition {
+	p.put.WithTTL(expiry)
+	return p
+}
+
+// WithCondition adds an additional condition expression (AND).
+func (p *PutWithCondition) WithCondition(c expression2.ConditionBuilder) *PutWithCondition {
+	if p.put.c.IsSet() {
+		p.put.c = p.put.c.And(c)
+	} else {
+		p.put.c = c
+	}
+	return p
+}
+
+func (p *PutWithCondition) Build() (expression2.Expression, map[string]types.AttributeValue, error) {
+	return p.put.Build()
+}
+
+func (p *PutWithCondition) ToPutItem() (*dynamodbv2.PutItemInput, error) {
+	return p.put.ToPutItem()
+}
+
+func (p *PutWithCondition) ToTransactWriteItem() (types.TransactWriteItem, error) {
+	return p.put.ToTransactWriteItem()
 }

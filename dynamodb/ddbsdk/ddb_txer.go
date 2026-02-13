@@ -57,7 +57,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 		// use operation directly instead of TransactWriteItems, to avoid transactional overhead
 		for _, update := range tx.actions {
 			switch a := update.(type) {
-			case *Put:
+			case PutItemAction:
 				put, err := a.ToPutItem()
 				if err != nil {
 					return fmt.Errorf("failed to convert put to put item: %w", err)
@@ -66,7 +66,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to put item: %w", err)
 				}
-			case *UnsafeUpdate:
+			case UpdateItemAction:
 				update, err := a.ToUpdateItem()
 				if err != nil {
 					return fmt.Errorf("failed to convert update to update item: %w", err)
@@ -75,7 +75,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to update item: %w", err)
 				}
-			case *Delete:
+			case DeleteItemAction:
 				delete, err := a.ToDeleteItem()
 				if err != nil {
 					return fmt.Errorf("failed to convert delete to delete item: %w", err)
@@ -91,7 +91,7 @@ func (tx *txer) Commit(ctx context.Context) error {
 	default:
 		txInputs := make([]types.TransactWriteItem, 0)
 		for _, update := range tx.actions {
-			twi, err := toTransactWriteItem(update)
+			twi, err := update.ToTransactWriteItem()
 			if err != nil {
 				return fmt.Errorf("failed to convert action to transact write item: %w", err)
 			}
@@ -109,18 +109,8 @@ func (tx *txer) Commit(ctx context.Context) error {
 	return nil
 }
 
-// no point to extract into the interface and pollute the public interface. Doesn't save much readability.
-func toTransactWriteItem(action Action) (types.TransactWriteItem, error) {
-	switch a := action.(type) {
-	case *Put:
-		return a.ToTransactWriteItem()
-	case *UnsafeUpdate:
-		return a.ToTransactWriteItem()
-	case *Delete:
-		return a.ToTransactWriteItem()
-	default:
-		return types.TransactWriteItem{}, fmt.Errorf("unknown operation type: %T", a)
-	}
+type txWriteItem interface {
+	ToTransactWriteItem() (types.TransactWriteItem, error)
 }
 
 type TxOption func(*txOpts) *txOpts

@@ -1,7 +1,6 @@
 package ddbsdk
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -11,18 +10,6 @@ import (
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
-
-func (c *Client) UpdateItem(ctx context.Context, u *UnsafeUpdate) error {
-	update, err := u.ToUpdateItem()
-	if err != nil {
-		return fmt.Errorf("failed to convert update to update item: %w", err)
-	}
-	_, err = c.awsddb.UpdateItem(ctx, update)
-	if err != nil {
-		return fmt.Errorf("failed to update item: %w", err)
-	}
-	return nil
-}
 
 func NewUnsafeUpdate(table table.TableDefinition, pk table.PrimaryKey) *UnsafeUpdate {
 	return &UnsafeUpdate{
@@ -50,6 +37,10 @@ func (u *UnsafeUpdate) AddOp(op UpdateOp) *UnsafeUpdate {
 	return u
 }
 
+// Update the expiry of the item. Can be used standalone, without calling AddOp.
+// Example:
+//
+//	NewUnsafeUpdate(table, pk).RefreshTTL(time.Now().Add(24 * time.Hour))
 func (u *UnsafeUpdate) RefreshTTL(expiry time.Time) *UnsafeUpdate {
 	u.ttlExpiry = &expiry
 	return u

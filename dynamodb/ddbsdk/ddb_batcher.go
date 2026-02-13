@@ -36,8 +36,8 @@ type batcher struct {
 var _ Batcher = &batcher{}
 
 // AddAction adds BatchActions (Put or Delete) to the batch.
-// Returns error if an action with the same table+primarykey already exists,
-// or if the action has a condition expression set.
+// Returns error if an action with the same table+primarykey already exists.
+// Note: PutWithCondition does not implement BatchAction and cannot be used here.
 func (b *batcher) AddAction(actions ...BatchAction) error {
 	for _, a := range actions {
 		tableName := *a.TableName()

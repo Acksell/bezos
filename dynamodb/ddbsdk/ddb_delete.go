@@ -1,7 +1,6 @@
 package ddbsdk
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/acksell/bezos/dynamodb/table"
@@ -10,18 +9,6 @@ import (
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
-
-func (c *Client) DeleteItem(ctx context.Context, d *Delete) error {
-	del, err := d.ToDeleteItem()
-	if err != nil {
-		return fmt.Errorf("failed to convert delete to delete item: %w", err)
-	}
-	_, err = c.awsddb.DeleteItem(ctx, del)
-	if err != nil {
-		return fmt.Errorf("failed to delete item: %w", err)
-	}
-	return nil
-}
 
 func NewDelete(table table.TableDefinition, pk table.PrimaryKey) *Delete {
 	return &Delete{
@@ -38,13 +25,9 @@ func (d *Delete) PrimaryKey() table.PrimaryKey {
 	return d.Key
 }
 
-func (d *Delete) WithCondition(c expression2.ConditionBuilder) *Delete {
-	if d.c.IsSet() {
-		d.c = d.c.And(c)
-		return d
-	}
+func (d *Delete) WithCondition(c expression2.ConditionBuilder) *DeleteWithCondition {
 	d.c = c
-	return d
+	return &DeleteWithCondition{del: d}
 }
 
 func (d *Delete) Build() (expression2.Expression, error) {
@@ -94,12 +77,41 @@ func (d *Delete) batchWritable() {}
 
 // ToBatchWriteRequest converts the Delete to a WriteRequest for BatchWriteItem.
 func (d *Delete) ToBatchWriteRequest() (types.WriteRequest, error) {
-	if d.c.IsSet() {
-		return types.WriteRequest{}, fmt.Errorf("BatchWriteItem does not support condition expressions; use TransactWriteItems or DeleteItem instead")
-	}
 	return types.WriteRequest{
 		DeleteRequest: &types.DeleteRequest{
 			Key: d.PrimaryKey().DDB(),
 		},
 	}, nil
+}
+
+// DeleteWithCondition methods - delegates to the underlying Delete
+
+func (d *DeleteWithCondition) TableName() *string {
+	return d.del.TableName()
+}
+
+func (d *DeleteWithCondition) PrimaryKey() table.PrimaryKey {
+	return d.del.PrimaryKey()
+}
+
+// WithCondition adds an additional condition expression (AND).
+func (d *DeleteWithCondition) WithCondition(c expression2.ConditionBuilder) *DeleteWithCondition {
+	if d.del.c.IsSet() {
+		d.del.c = d.del.c.And(c)
+	} else {
+		d.del.c = c
+	}
+	return d
+}
+
+func (d *DeleteWithCondition) Build() (expression2.Expression, error) {
+	return d.del.Build()
+}
+
+func (d *DeleteWithCondition) ToDeleteItem() (*dynamodbv2.DeleteItemInput, error) {
+	return d.del.ToDeleteItem()
+}
+
+func (d *DeleteWithCondition) ToTransactWriteItem() (types.TransactWriteItem, error) {
+	return d.del.ToTransactWriteItem()
 }
