@@ -56,12 +56,11 @@ func (u *UnsafeUpdate) RefreshTTL(expiry time.Time) *UnsafeUpdate {
 }
 
 func (u *UnsafeUpdate) WithCondition(c expression2.ConditionBuilder) *UnsafeUpdate {
-	if u.c == nil {
-		u.c = &c
-	} else {
-		merged := u.c.And(c)
-		u.c = &merged
+	if u.c.IsSet() {
+		u.c = u.c.And(c)
+		return u
 	}
+	u.c = c
 	return u
 }
 
@@ -113,8 +112,8 @@ func (u *UnsafeUpdate) Build() (expression2.Expression, error) {
 		}
 	}
 	b := expression2.NewBuilder()
-	if u.c != nil {
-		b = b.WithCondition(*u.c)
+	if u.c.IsSet() {
+		b = b.WithCondition(u.c)
 	}
 	b = b.WithUpdate(u.u)
 	e, err := b.Build()

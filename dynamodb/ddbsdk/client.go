@@ -35,7 +35,7 @@ type Client struct {
 var _ IO = &Client{}
 
 func (c *Client) NewTx(opts ...TxOption) Txer {
-	return NewTxer(c.awsddb, opts...)
+	return NewTx(c.awsddb, opts...)
 }
 
 func (c *Client) NewBatch(opts ...BatchOption) Batcher {

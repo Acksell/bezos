@@ -11,10 +11,16 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewTxer(ddb AWSDynamoClientV2, opts ...TxOption) Txer {
+// actionKey uniquely identifies an item across tables
+type actionKey struct {
+	tableName  string
+	primaryKey table.PrimaryKey
+}
+
+func NewTx(ddb AWSDynamoClientV2, opts ...TxOption) Txer {
 	tx := &txer{
 		awsddb:  ddb,
-		actions: make(map[table.PrimaryKey]Action),
+		actions: make(map[actionKey]Action),
 	}
 	for _, opt := range opts {
 		opt(&tx.opts)
@@ -27,42 +33,22 @@ type txer struct {
 
 	opts txOpts
 
-	actions map[table.PrimaryKey]Action
+	actions map[actionKey]Action
 	errs    []error // errors from AddAction, checked in Commit
-
-	// once stackCounter goes from 1 to 0, the transaction is committed to database.
-	// incremented on Start(), decremented on Commit()
-	stackCounter int // todo remove stackcounter implementation
-}
-
-// todo remove Start function and stackcounter implementation
-func (tx *txer) Start(ctx context.Context, opts ...TxOption) {
-	for _, opt := range opts {
-		opt(&tx.opts)
-	}
-	tx.stackCounter++
 }
 
 func (tx *txer) AddAction(a Action) {
-	if _, found := tx.actions[a.PrimaryKey()]; found {
-		tx.errs = append(tx.errs, fmt.Errorf("an action already exists for primary key: %v", a.PrimaryKey()))
+	key := actionKey{tableName: *a.TableName(), primaryKey: a.PrimaryKey()}
+	if _, found := tx.actions[key]; found {
+		tx.errs = append(tx.errs, fmt.Errorf("an action already exists for table %s, primary key: %v", *a.TableName(), a.PrimaryKey()))
 		return
 	}
-	tx.actions[a.PrimaryKey()] = a
+	tx.actions[key] = a
 }
 
-// If a transaction already started in this context, commit in this context does nothing, since it's not the outer-most transaction.
-// todo: add return value
 func (tx *txer) Commit(ctx context.Context) error {
 	if len(tx.errs) > 0 {
 		return errors.Join(tx.errs...)
-	}
-	tx.stackCounter--
-	if tx.stackCounter < 0 {
-		return fmt.Errorf("too many commits, no started transaction")
-	}
-	if tx.stackCounter != 0 {
-		return nil
 	}
 	switch len(tx.actions) {
 	case 0:
