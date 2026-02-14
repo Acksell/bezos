@@ -73,6 +73,7 @@ type indexData struct {
 	SortKey      *keyData
 	HasSortKey   bool
 	GSIs         []gsiData
+	IsVersioned  bool // True if entity implements VersionedDynamoEntity
 }
 
 // HasEntity returns true if this index has an associated entity type.
@@ -120,6 +121,7 @@ func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
 		IndexVarName: idx.VarName,
 		EntityType:   idx.EntityType,
 		PartitionKey: pkData,
+		IsVersioned:  idx.IsVersioned,
 	}
 
 	if idx.SortKey != "" {
@@ -381,7 +383,7 @@ type {{$idx.Name}}IndexUtil struct {
 // {{$idx.Name}}Index is the typed wrapper for {{$idx.Name}} operations.
 var {{$idx.Name}}Index = {{$idx.Name}}IndexUtil{PrimaryIndex: &{{$idx.IndexVarName}}}
 
-// PrimaryKey creates a strongly-typed primary key from explicit parameters.
+// PrimaryKey creates a primary key from explicit parameters.
 func (idx {{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
@@ -394,7 +396,7 @@ func (idx {{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKe
 	}
 }
 {{if $idx.HasEntity}}
-// PrimaryKeyFrom extracts the primary key from a {{$idx.EntityType}} entity.
+// PrimaryKeyFrom creates the primary key from a {{$idx.EntityType}} entity.
 func (idx {{$idx.Name}}IndexUtil) PrimaryKeyFrom(e *{{$idx.EntityType}}) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
@@ -406,19 +408,50 @@ func (idx {{$idx.Name}}IndexUtil) PrimaryKeyFrom(e *{{$idx.EntityType}}) table.P
 		},
 	}
 }
-
-// NewUnsafePut creates a Put operation without optimistic locking.
-func (idx {{$idx.Name}}IndexUtil) NewUnsafePut(e *{{$idx.EntityType}}) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+{{if $idx.GSIs}}
+// GSIKeysFrom creates all GSI keys from a {{$idx.EntityType}} entity.
+func (idx {{$idx.Name}}IndexUtil) GSIKeysFrom(e *{{$idx.EntityType}}) []table.PrimaryKey {
+	return []table.PrimaryKey{
+		{{- range $gsi := $idx.GSIs}}
+		{
+			Definition: idx.Secondary[{{$gsi.Index}}].KeyDefinition(),
+			Values: table.PrimaryKeyValues{
+				PartitionKey: {{$gsi.PartitionKey.EntityFormatExpr}},
+				{{- if $gsi.HasSortKey}}
+				SortKey:      {{$gsi.SortKey.EntityFormatExpr}},
+				{{- end}}
+			},
+		},
+		{{- end}}
+	}
 }
 {{end}}
-// NewDelete creates a Delete operation.
-func (idx {{$idx.Name}}IndexUtil) NewDelete({{allParams $idx}}) *ddbsdk.Delete {
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx {{$idx.Name}}IndexUtil) UnsafePut(e *{{$idx.EntityType}}) *ddbsdk.Put {
+	{{- if $idx.GSIs}}
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+	{{- else}}
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+	{{- end}}
+}
+{{if $idx.IsVersioned}}
+// SafePut creates a Put operation with optimistic locking.
+func (idx {{$idx.Name}}IndexUtil) SafePut(e *{{$idx.EntityType}}) *ddbsdk.PutWithCondition {
+	{{- if $idx.GSIs}}
+	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+	{{- else}}
+	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+	{{- end}}
+}
+{{end}}
+{{end}}
+// Delete creates a Delete operation.
+func (idx {{$idx.Name}}IndexUtil) Delete({{allParams $idx}}) *ddbsdk.Delete {
 	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey({{allArgs $idx}}))
 }
 
-// NewUnsafeUpdate creates an Update operation without optimistic locking.
-func (idx {{$idx.Name}}IndexUtil) NewUnsafeUpdate({{allParams $idx}}) *ddbsdk.UnsafeUpdate {
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx {{$idx.Name}}IndexUtil) UnsafeUpdate({{allParams $idx}}) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey({{allArgs $idx}}))
 }
 

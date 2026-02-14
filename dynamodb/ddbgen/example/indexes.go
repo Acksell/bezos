@@ -18,6 +18,16 @@ var UserTable = table.TableDefinition{
 		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
 		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
 	},
+	GSIs: []table.TableDefinition{
+		{
+			Name:  "ByEmail",
+			IsGSI: true,
+			KeyDefinitions: table.PrimaryKeyDefinition{
+				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+			},
+		},
+	},
 }
 
 var userIndex = index.PrimaryIndex[User]{

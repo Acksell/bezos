@@ -22,6 +22,8 @@ type IndexInfo struct {
 	SortKey string
 	// GSIs holds information about secondary indexes
 	GSIs []GSIInfo
+	// IsVersioned is true if the entity implements VersionedDynamoEntity
+	IsVersioned bool
 }
 
 // GSIInfo holds discovered information about a SecondaryIndex.
@@ -135,6 +137,9 @@ func Discover(dir string) (*DiscoverResult, error) {
 				if err != nil {
 					return nil, fmt.Errorf("parsing index %s: %w", varName, err)
 				}
+
+				// Check if entity implements VersionedDynamoEntity
+				indexInfo.IsVersioned = implementsVersionedEntity(pkg.Types, entityType)
 
 				result.Indexes = append(result.Indexes, indexInfo)
 
@@ -285,13 +290,13 @@ func parseSecondaryIndex(idx int, expr ast.Expr) (GSIInfo, error) {
 		switch key.Name {
 		case "Name":
 			gsi.Name = extractStringLiteral(kv.Value)
-		case "PartitionKey":
-			def, pattern := parseKeyLiteral(kv.Value)
+		case "Partition":
+			def, pattern := parseKeyValDef(kv.Value)
 			gsi.PKDef = def
 			gsi.PKPattern = pattern
-		case "SortKey":
-			// SortKey is *keys.Key, might be address-of
-			def, pattern := parseKeyLiteral(kv.Value)
+		case "Sort":
+			// Sort is *KeyValDef, might be address-of
+			def, pattern := parseKeyValDef(kv.Value)
 			gsi.SKDef = def
 			gsi.SKPattern = pattern
 		}
@@ -300,8 +305,8 @@ func parseSecondaryIndex(idx int, expr ast.Expr) (GSIInfo, error) {
 	return gsi, nil
 }
 
-// parseKeyLiteral parses a keys.Key composite literal, returning (defName, pattern).
-func parseKeyLiteral(expr ast.Expr) (string, string) {
+// parseKeyValDef parses a KeyValDef composite literal, returning (defName, pattern).
+func parseKeyValDef(expr ast.Expr) (string, string) {
 	// Handle address-of operator
 	if unary, ok := expr.(*ast.UnaryExpr); ok && unary.Op == token.AND {
 		expr = unary.X
@@ -326,9 +331,9 @@ func parseKeyLiteral(expr ast.Expr) (string, string) {
 		}
 
 		switch key.Name {
-		case "Def":
+		case "KeyDef":
 			defName = parseKeyDefName(kv.Value)
-		case "Spec":
+		case "ValDef":
 			pattern = extractFmtPattern(kv.Value)
 		}
 	}
@@ -489,4 +494,45 @@ func typeString(t types.Type) string {
 	default:
 		return t.String()
 	}
+}
+
+// implementsVersionedEntity checks if the entity type implements VersionedDynamoEntity.
+// This is done by checking if *EntityType has a Version() method.
+func implementsVersionedEntity(pkg *types.Package, typeName string) bool {
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil {
+		return false
+	}
+
+	named, ok := obj.Type().(*types.Named)
+	if !ok {
+		return false
+	}
+
+	// Check methods on pointer receiver (*Entity)
+	ptrType := types.NewPointer(named)
+	methodSet := types.NewMethodSet(ptrType)
+
+	for i := 0; i < methodSet.Len(); i++ {
+		method := methodSet.At(i)
+		if method.Obj().Name() == "VersionField" {
+			// Check signature: VersionField() (string, any)
+			sig, ok := method.Obj().Type().(*types.Signature)
+			if !ok {
+				continue
+			}
+			// Should have no params and 2 results
+			if sig.Params().Len() != 0 || sig.Results().Len() != 2 {
+				continue
+			}
+			// First result should be string
+			if basic, ok := sig.Results().At(0).Type().(*types.Basic); ok {
+				if basic.Kind() == types.String {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }

@@ -4,7 +4,6 @@ package example
 
 import (
 	"fmt"
-
 	"github.com/acksell/bezos/dynamodb/ddbsdk"
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/table"
@@ -44,27 +43,46 @@ func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
 	}
 }
 
-// NewUnsafePut creates a Put operation without optimistic locking.
-func (idx UserIndexUtil) NewUnsafePut(e *User) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+// GSIKeysFrom extracts all GSI keys from a User entity.
+func (idx UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
+	return []table.PrimaryKey{
+		{
+			Definition: idx.Secondary[0].KeyDefinition(),
+			Values: table.PrimaryKeyValues{
+				PartitionKey: fmt.Sprintf("EMAIL#%s", e.Email),
+				SortKey:      fmt.Sprintf("USER#%s", e.UserID),
+			},
+		},
+	}
 }
 
-// NewDelete creates a Delete operation.
-func (idx UserIndexUtil) NewDelete(id string) *ddbsdk.Delete {
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx UserIndexUtil) UnsafePut(e *User) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+}
+
+// SafePut creates a Put operation with optimistic locking.
+func (idx UserIndexUtil) SafePut(e *User) *ddbsdk.PutWithCondition {
+	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+}
+
+// Delete creates a Delete operation.
+func (idx UserIndexUtil) Delete(id string) *ddbsdk.Delete {
 	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(id))
 }
 
-// NewUnsafeUpdate creates an Update operation without optimistic locking.
-func (idx UserIndexUtil) NewUnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx UserIndexUtil) UnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(id))
 }
 
 // ByEmailKey creates a key for querying the ByEmail GSI.
-func (idx UserIndexUtil) ByEmailKey() table.PrimaryKey {
+func (idx UserIndexUtil) ByEmailKey(email string, id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
-			PartitionKey: "",
+			PartitionKey: fmt.Sprintf("EMAIL#%s", email),
+			SortKey:      fmt.Sprintf("USER#%s", id),
 		},
 	}
 }
@@ -103,17 +121,17 @@ func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 	}
 }
 
-// NewUnsafePut creates a Put operation without optimistic locking.
-func (idx OrderIndexUtil) NewUnsafePut(e *Order) *ddbsdk.Put {
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx OrderIndexUtil) UnsafePut(e *Order) *ddbsdk.Put {
 	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
 }
 
-// NewDelete creates a Delete operation.
-func (idx OrderIndexUtil) NewDelete(tenantID string, orderID string) *ddbsdk.Delete {
+// Delete creates a Delete operation.
+func (idx OrderIndexUtil) Delete(tenantID string, orderID string) *ddbsdk.Delete {
 	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(tenantID, orderID))
 }
 
-// NewUnsafeUpdate creates an Update operation without optimistic locking.
-func (idx OrderIndexUtil) NewUnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx OrderIndexUtil) UnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(tenantID, orderID))
 }
