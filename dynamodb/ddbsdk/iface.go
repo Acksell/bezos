@@ -37,7 +37,7 @@ type Writer interface {
 
 type Reader interface {
 	NewQuery(table.TableDefinition, KeyCondition) Querier
-	NewGet(...GetOption) Getter
+	NewLookup(...GetOption) Getter
 }
 
 type Txer interface {
@@ -46,7 +46,7 @@ type Txer interface {
 }
 
 type Batcher interface {
-	AddAction(...BatchAction) error
+	AddAction(...BatchAction)
 	Exec(context.Context) (ExecResult, error)
 	ExecAndRetry(context.Context) error
 }
@@ -56,8 +56,11 @@ type Querier interface {
 	QueryAll(context.Context) (*QueryResult, error)
 }
 
+// ConsistentReads are enabled by default.
+// To use EventuallyConsistent reads, add the WithEventuallyConsistentReads option.
 type Getter interface {
 	// GetItem retrieves a single item from DynamoDB.
+	// Serializable isolation.
 	GetItem(context.Context, GetItemRequest) (Item, error)
 	// GetItemsTx retrieves multiple items.
 	// Serializable isolation.
@@ -65,12 +68,16 @@ type Getter interface {
 	// Each item can have its own projection since items may have different schemas.
 	GetItemsTx(context.Context, ...GetItemRequest) ([]Item, error)
 	// GetItemsBatch retrieves multiple items using BatchGetItem.
-	// Not serializable isolation.
-	// Handles unprocessed keys by retrying automatically.
-	// Maximum 100 items per batch (DynamoDB limit).
 	//
-	// Note: BatchGetItem applies projection per-table, so all items from the same table
-	// will use the projection from the first item encountered for that table.
+	// As a batch unit, not serializable isolation. Only read-committed isolation.
+	// On a per-item basis, it is serializable.
+	// Translation:
+	// If there's a concurrent transaction write request in-flight,
+	// it's possible that you'll be able to read the new state of
+	// some of the items and the old state of the other items.
+	// If you need better isolation guarantees, use GetItemsTx.
+	//
+	// Maximum 100 items per batch (DynamoDB limit).
 	GetItemsBatch(context.Context, ...GetItemRequest) ([]Item, error)
 }
 

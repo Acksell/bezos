@@ -2,6 +2,7 @@ package ddbsdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -30,15 +31,17 @@ type batcher struct {
 	opts   batchOpts
 
 	pending map[string][]types.WriteRequest
+	errs    []error
 	retries int
 }
 
 var _ Batcher = &batcher{}
 
 // AddAction adds BatchActions (Put or Delete) to the batch.
-// Returns error if an action with the same table+primarykey already exists.
-// Note: PutWithCondition does not implement BatchAction and cannot be used here.
-func (b *batcher) AddAction(actions ...BatchAction) error {
+// Any errors are accumulated and returned by [Exec] or [ExecAndRetry].
+//
+// Note: Batch operations do not support conditions, nor Update actions.
+func (b *batcher) AddAction(actions ...BatchAction) {
 	for _, a := range actions {
 		tableName := *a.TableName()
 
@@ -50,10 +53,12 @@ func (b *batcher) AddAction(actions ...BatchAction) error {
 		case *Delete:
 			req, err = act.ToBatchWriteRequest()
 		default:
-			return fmt.Errorf("unsupported action type: %T", a)
+			b.errs = append(b.errs, fmt.Errorf("unsupported action type: %T", a))
+			continue
 		}
 		if err != nil {
-			return err
+			b.errs = append(b.errs, err)
+			continue
 		}
 
 		// Check for duplicate key
@@ -61,18 +66,21 @@ func (b *batcher) AddAction(actions ...BatchAction) error {
 		for _, existing := range b.pending[tableName] {
 			existingKey := extractKey(existing)
 			if keysEqual(newKey, existingKey) {
-				return fmt.Errorf("duplicate action for table %s", tableName)
+				b.errs = append(b.errs, fmt.Errorf("duplicate action for table %s", tableName))
+				break
 			}
 		}
 
 		b.pending[tableName] = append(b.pending[tableName], req)
 	}
-	return nil
 }
 
 // Exec attempts to write all pending items once (no retries).
-// Returns ExecResult with any unprocessed items.
+// Returns [ExecResult] with any unprocessed items.
 func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
+	if len(b.errs) > 0 {
+		return ExecResult{Unprocessed: b.pending, Retries: b.retries}, errors.Join(b.errs...)
+	}
 	if len(b.pending) == 0 {
 		return ExecResult{Retries: b.retries}, nil
 	}
@@ -98,11 +106,13 @@ func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
 
 // ExecAndRetry writes all pending items, retrying until complete or limits exceeded.
 // At least one of [WithMaxRetries] or [WithTimeout] must be configured.
-// Uses exponential backoff by default (50ms, 100ms, 200ms, ...), override with [WithBackoff].
+// Uses exponential backoff by default (50ms, 100ms, 200ms, ...), override with [WithCustomBackoff].
 //
 // Example:
 //
-//	batch := client.NewBatch(ddbsdk.WithMaxRetries(5))
+//	batch := client.NewBatch(
+//		ddbsdk.WithMaxRetries(5),
+//	    ddbsdk.WithTimeout(5*time.Second))
 //	batch.AddAction(putUser, putOrder, deleteOldItem)
 //	if err := batch.ExecAndRetry(ctx); err != nil {
 //	    return err

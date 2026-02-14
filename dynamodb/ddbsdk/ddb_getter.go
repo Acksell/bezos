@@ -98,6 +98,8 @@ func (g *getter) GetItemsTx(ctx context.Context, items ...GetItemRequest) ([]Ite
 	return extractItemsFromResponses(res.Responses), nil
 }
 
+// Todo1 improve retrying API
+// Todo2: also improve the projection api: BatchGetItem applies projection per-table, so all items from the same table use the projection from the first item encountered for that table.
 func (g *getter) GetItemsBatch(ctx context.Context, items ...GetItemRequest) ([]Item, error) {
 	if len(items) == 0 {
 		return nil, nil
@@ -232,8 +234,6 @@ func extractItemsFromResponses(responses []types.ItemResponse) []Item {
 type GetOption func(*getOpts)
 
 type getOpts struct {
-	// eventuallyConsistent enables eventually consistent reads.
-	// Default is strongly consistent reads.
 	// Note: TransactGetItems always uses serializable isolation.
 	eventuallyConsistent bool
 }
