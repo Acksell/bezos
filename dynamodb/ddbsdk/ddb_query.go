@@ -59,10 +59,6 @@ func NewKeyCondition(partition any, strategy SortKeyStrategy) KeyCondition {
 }
 
 // todo make first two arguments here part of the dynamodb client interface. ddb Clients should be able to return a Querier and a Getter.
-//
-// todo: replace TableDefinition argument with "Index" interface that has "Table()" method, and "IndexName()" method.
-// The base table can export methods like "Primary()", "GSI_1()" that return the index.
-// Then you can call them via "artifacts.Table.GSI_1()"
 func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondition) *querier {
 	return &querier{
 		awsddb:  ddb,

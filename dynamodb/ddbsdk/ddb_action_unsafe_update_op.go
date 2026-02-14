@@ -42,7 +42,7 @@ func (o setFieldOp[T]) IsIdempotent() bool {
 }
 
 func (o setFieldOp[T]) Apply(expr expression.UpdateBuilder) expression.UpdateBuilder {
-	return expr.Add(expression.Name(o.field), expression.Value(o.value))
+	return expr.Set(expression.Name(o.field), expression.Value(o.value))
 }
 
 type removeFieldOp struct {
@@ -133,8 +133,3 @@ func (o addNumberOp[T]) Field() string {
 func (o addNumberOp[T]) Apply(expr expression.UpdateBuilder) expression.UpdateBuilder {
 	return expr.Add(expression.Name(o.field), expression.Value(o.value))
 }
-
-//todo can type this more properly, and autogenerate the field variables so you don't rely on hardcoded strings.
-// type Field struct {
-// 	Name string
-// }

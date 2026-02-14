@@ -56,10 +56,7 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	if err != nil {
 		return expression2.Expression{}, nil, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
 	}
-	b := expression2.NewBuilder()
-	if p.c.IsSet() {
-		b = b.WithCondition(p.c)
-	}
+
 	if p.ttlExpiry != nil {
 		entity[p.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
 	}
@@ -71,10 +68,17 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 			entity[k] = v
 		}
 	}
-	exp, err := b.Build()
-	if err != nil {
-		return expression2.Expression{}, nil, fmt.Errorf("build: %w", err)
+
+	// Only build expression if there's a condition set
+	var exp expression2.Expression
+	if p.c.IsSet() {
+		b := expression2.NewBuilder().WithCondition(p.c)
+		exp, err = b.Build()
+		if err != nil {
+			return expression2.Expression{}, nil, fmt.Errorf("build: %w", err)
+		}
 	}
+
 	return exp, entity, nil
 }
 

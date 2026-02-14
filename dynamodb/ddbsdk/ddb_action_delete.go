@@ -31,13 +31,15 @@ func (d *Delete) WithCondition(c expression2.ConditionBuilder) *DeleteWithCondit
 }
 
 func (d *Delete) Build() (expression2.Expression, error) {
-	b := expression2.NewBuilder()
+	// Only build expression if there's a condition set
+	var e expression2.Expression
 	if d.c.IsSet() {
-		b = b.WithCondition(d.c)
-	}
-	e, err := b.Build()
-	if err != nil {
-		return expression2.Expression{}, fmt.Errorf("build: %w", err)
+		b := expression2.NewBuilder().WithCondition(d.c)
+		var err error
+		e, err = b.Build()
+		if err != nil {
+			return expression2.Expression{}, fmt.Errorf("build: %w", err)
+		}
 	}
 	return e, nil
 }
