@@ -14,24 +14,6 @@ type Store struct {
 	tables map[string]*tableSchema
 }
 
-type tableSchema struct {
-	definition table.TableDefinition
-	gsis       map[string]*gsiSchema
-}
-
-func (t *tableSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
-	return encodeBadgerKey(t.definition.Name, "", pk)
-}
-
-type gsiSchema struct {
-	tableName  string
-	definition table.GSIDefinition
-}
-
-func (g *gsiSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
-	return encodeBadgerKey(g.tableName, g.definition.Name, pk)
-}
-
 // StoreOptions configures the BadgerDB store.
 type StoreOptions struct {
 	// Path to the database directory. If empty, uses in-memory mode.
@@ -123,4 +105,22 @@ func (s *Store) getBadgerKeyEncoder(tableName *string, indexName *string) (*badg
 		indexName: gsi.definition.Name,
 		keyDefs:   gsi.definition.KeyDefinitions,
 	}, nil
+}
+
+type tableSchema struct {
+	definition table.TableDefinition
+	gsis       map[string]*gsiSchema
+}
+
+func (t *tableSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
+	return encodeBadgerKey(t.definition.Name, "", pk)
+}
+
+type gsiSchema struct {
+	tableName  string
+	definition table.GSIDefinition
+}
+
+func (g *gsiSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
+	return encodeBadgerKey(g.tableName, g.definition.Name, pk)
 }
