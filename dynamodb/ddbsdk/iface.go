@@ -36,7 +36,7 @@ type Writer interface {
 }
 
 type Reader interface {
-	NewQuery(table.TableDefinition, KeyCondition) Querier
+	NewQuery(table.TableDefinition, KeyCondition, ...QueryOption) Querier
 	NewLookup(...GetOption) Getter
 }
 
@@ -59,7 +59,7 @@ type Querier interface {
 }
 
 // ConsistentReads are enabled by default.
-// To use EventuallyConsistent reads, add the WithEventuallyConsistentReads option.
+// To use EventuallyConsistent reads, add the WithEventualConsistency option.
 type Getter interface {
 	// GetItem retrieves a single item from DynamoDB.
 	// Serializable isolation.

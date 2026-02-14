@@ -11,14 +11,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// type QueryPattern string
-
-// const (
-// 	PartitionKeyPagination = "pkPagination"
-// 	SortedPagination       = "skPagination"
-// 	DirectLookup           = "directLookup"
-// )
-
 type querier struct {
 	awsddb AWSDynamoClientV2
 
@@ -46,6 +38,57 @@ type queryOptions struct {
 
 const defaultPageSize = 10
 
+// QueryOption configures the querier behavior.
+type QueryOption func(*queryOptions)
+
+// WithEventuallyConsistentReads enables eventually consistent reads.
+// By default, reads are strongly consistent.
+func WithEventuallyConsistentReads() QueryOption {
+	return func(o *queryOptions) {
+		o.eventuallyConsistent = true
+	}
+}
+
+// WithDescending returns results in descending sort key order.
+// By default, results are returned in ascending order.
+func WithDescending() QueryOption {
+	return func(o *queryOptions) {
+		o.descending = true
+	}
+}
+
+// WithPageSize sets the maximum number of items to return per page.
+// Default is 10.
+func WithPageSize(limit int) QueryOption {
+	return func(o *queryOptions) {
+		o.pageSize = int32(limit)
+	}
+}
+
+// WithGSI queries a Global Secondary Index instead of the main table.
+func WithGSI(indexName string) QueryOption {
+	return func(o *queryOptions) {
+		o.indexName = &indexName
+	}
+}
+
+// WithProjection limits the attributes returned in the response.
+// Only the specified attributes will be retrieved from DynamoDB.
+func WithProjection(attrs ...string) QueryOption {
+	return func(o *queryOptions) {
+		o.projectionAttributes = attrs
+	}
+}
+
+// WithFilter applies a filter expression to the query results.
+// Filter expressions are applied after the query but before results are returned.
+// Note: filtered items still consume read capacity.
+func WithFilter(filter expression2.ConditionBuilder) QueryOption {
+	return func(o *queryOptions) {
+		o.filter = filter
+	}
+}
+
 type KeyCondition struct {
 	partition any
 	strategy  SortKeyStrategy
@@ -59,8 +102,8 @@ func NewKeyCondition(partition any, strategy SortKeyStrategy) KeyCondition {
 }
 
 // todo make first two arguments here part of the dynamodb client interface. ddb Clients should be able to return a Querier and a Getter.
-func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondition) *querier {
-	return &querier{
+func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondition, opts ...QueryOption) *querier {
+	q := &querier{
 		awsddb:  ddb,
 		table:   table,
 		keyCond: kc,
@@ -68,6 +111,10 @@ func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondit
 			pageSize: defaultPageSize,
 		},
 	}
+	for _, opt := range opts {
+		opt(&q.opts)
+	}
+	return q
 }
 
 type QueryResult struct {
@@ -144,31 +191,4 @@ func (q *querier) QueryAll(ctx context.Context) (*QueryResult, error) {
 		Items:  allItems,
 		IsDone: true,
 	}, nil
-}
-
-func (q *querier) WithEventuallyConsistentReads() *querier {
-	q.opts.eventuallyConsistent = true
-	return q
-}
-
-func (q *querier) WithDescending() *querier {
-	q.opts.descending = true
-	return q
-}
-
-func (q *querier) WithPageSize(limit int) *querier {
-	q.opts.pageSize = int32(limit)
-	return q
-}
-
-func (q *querier) WithGSI(indexName string) *querier {
-	q.opts.indexName = &indexName
-	return q
-}
-
-// WithProjection limits the attributes returned in the response.
-// Only the specified attributes will be retrieved from DynamoDB.
-func (q *querier) WithProjection(attrs ...string) *querier {
-	q.opts.projectionAttributes = attrs
-	return q
 }

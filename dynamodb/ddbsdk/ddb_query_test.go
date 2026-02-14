@@ -335,7 +335,7 @@ func TestQuery_WithProjection(t *testing.T) {
 
 	// Query with projection - only get name field
 	kc := NewKeyCondition("user#1", nil)
-	querier := NewQuerier(db.(*Client).awsddb, queryTestTable, kc).WithProjection("pk", "sk", "name")
+	querier := db.NewQuery(queryTestTable, kc, WithProjection("pk", "sk", "name"))
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -381,7 +381,7 @@ func TestQuery_Descending(t *testing.T) {
 
 	// Query in descending order
 	kc := NewKeyCondition("user#1", nil)
-	querier := NewQuerier(db.(*Client).awsddb, queryTestTable, kc).WithDescending()
+	querier := db.NewQuery(queryTestTable, kc, WithDescending())
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {

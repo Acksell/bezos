@@ -193,7 +193,7 @@ func TestGetter_GetItem_EventuallyConsistent(t *testing.T) {
 	}
 
 	// Get with eventually consistent read
-	getter := db.NewLookup(WithEventuallyConsistentReads())
+	getter := db.NewLookup(WithEventualConsistency())
 	item, err := getter.GetItem(ctx, GetItemRequest{
 		Table: getterTestTable,
 		Key:   pk,

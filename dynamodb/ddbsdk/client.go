@@ -26,15 +26,16 @@ func (c *Client) NewBatch(opts ...BatchOption) Batcher {
 	return NewBatcher(c.awsddb, opts...)
 }
 
-func (c *Client) NewQuery(table table.TableDefinition, kc KeyCondition) Querier {
-	return NewQuerier(c.awsddb, table, kc)
+// NewQuery creates a new querier for partition-based queries.
+//
+// Options: [WithEventuallyConsistentReads], [WithDescending], [WithPageSize], [WithGSI], [WithProjection], [WithFilter]
+func (c *Client) NewQuery(table table.TableDefinition, kc KeyCondition, opts ...QueryOption) Querier {
+	return NewQuerier(c.awsddb, table, kc, opts...)
 }
 
 // NewLookup creates a new getter for direct lookups by primary key.
 //
-// Options: [WithEventuallyConsistentReads]
+// Options: [WithEventualConsistency]
 func (c *Client) NewLookup(opts ...GetOption) Getter {
-	return &getter{
-		awsddb: c.awsddb,
-	}
+	return NewGetter(c.awsddb, opts...)
 }

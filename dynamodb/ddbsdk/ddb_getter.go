@@ -238,10 +238,10 @@ type getOpts struct {
 	eventuallyConsistent bool
 }
 
-// WithEventuallyConsistentReads enables eventually consistent reads.
+// WithEventualConsistency enables eventually consistent reads for lookups.
 // By default, reads are strongly consistent.
 // Note: This option has no effect on GetItemsTx, which always uses serializable isolation.
-func WithEventuallyConsistentReads() GetOption {
+func WithEventualConsistency() GetOption {
 	return func(o *getOpts) {
 		o.eventuallyConsistent = true
 	}
