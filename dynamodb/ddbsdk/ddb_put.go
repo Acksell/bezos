@@ -34,6 +34,16 @@ func (p *Put) WithTTL(expiry time.Time) *Put {
 	return p
 }
 
+// WithGSIKeys adds GSI key values to be written with the item,
+// and validates that the GSI key definitions match the table's GSIs.
+//
+// If your entity already contains the GSI keys after marshalling,
+// then you don't need this method which just adds them as extra fields.
+func (p *Put) WithGSIKeys(keys ...table.PrimaryKey) *Put {
+	p.gsiKeys = append(p.gsiKeys, keys...)
+	return p
+}
+
 // WithCondition adds a condition expression and returns a PutWithCondition.
 // PutWithCondition cannot be used with BatchWriteItem.
 func (p *Put) WithCondition(c expression2.ConditionBuilder) *PutWithCondition {
@@ -53,15 +63,40 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	if p.ttlExpiry != nil {
 		entity[p.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
 	}
-	// for _, k := range p.Table.GSIKeys() {
-	// 	entity[k.Names.PartitionKeyName] = &types.AttributeValueMemberS{Value: k.Values.PartitionKey}
-	// 	entity[k.Names.SortKeyName] = &types.AttributeValueMemberS{Value: k.Values.SortKey}
-	// }
+	for _, gsiKey := range p.gsiKeys {
+		if err := p.validateGSIKey(gsiKey); err != nil {
+			return expression2.Expression{}, nil, err
+		}
+		for k, v := range gsiKey.DDB() {
+			entity[k] = v
+		}
+	}
 	exp, err := b.Build()
 	if err != nil {
 		return expression2.Expression{}, nil, fmt.Errorf("build: %w", err)
 	}
 	return exp, entity, nil
+}
+
+// validateGSIKey checks that the GSI key definition matches one of the table's GSI definitions.
+func (p *Put) validateGSIKey(gsiKey table.PrimaryKey) error {
+	for _, gsi := range p.Table.GSIs {
+		if gsiKey.Definition.PartitionKey.Name == gsi.KeyDefinitions.PartitionKey.Name &&
+			gsiKey.Definition.PartitionKey.Kind == gsi.KeyDefinitions.PartitionKey.Kind {
+			// Partition key matches, check sort key if defined
+			if gsiKey.Definition.SortKey.Name == "" && gsi.KeyDefinitions.SortKey.Name == "" {
+				return nil // Both have no sort key
+			}
+			if gsiKey.Definition.SortKey.Name == gsi.KeyDefinitions.SortKey.Name &&
+				gsiKey.Definition.SortKey.Kind == gsi.KeyDefinitions.SortKey.Kind {
+				return nil // Sort key matches
+			}
+		}
+	}
+	return fmt.Errorf("GSI key definition {PK: %q (%s), SK: %q (%s)} does not match any GSI on table %q",
+		gsiKey.Definition.PartitionKey.Name, gsiKey.Definition.PartitionKey.Kind,
+		gsiKey.Definition.SortKey.Name, gsiKey.Definition.SortKey.Kind,
+		p.Table.Name)
 }
 
 func (p *Put) ToPutItem() (*dynamodbv2.PutItemInput, error) {
@@ -122,6 +157,16 @@ func (p *PutWithCondition) PrimaryKey() table.PrimaryKey {
 
 func (p *PutWithCondition) WithTTL(expiry time.Time) *PutWithCondition {
 	p.put.WithTTL(expiry)
+	return p
+}
+
+// WithGSIKeys adds GSI key values to be written with the item,
+// and validates that the GSI key definitions match the table's GSIs.
+//
+// If your entity already contains the GSI keys after marshalling,
+// then you don't need this method which just adds them as extra fields.
+func (p *PutWithCondition) WithGSIKeys(keys ...table.PrimaryKey) *PutWithCondition {
+	p.put.WithGSIKeys(keys...)
 	return p
 }
 

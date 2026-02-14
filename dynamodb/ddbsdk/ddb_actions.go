@@ -43,6 +43,7 @@ type Put struct {
 	Key    table.PrimaryKey
 
 	ttlExpiry *time.Time
+	gsiKeys   []table.PrimaryKey
 
 	c expression2.ConditionBuilder
 }

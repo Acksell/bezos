@@ -16,7 +16,7 @@ type versionedEntity struct {
 
 func (e *versionedEntity) IsValid() error { return nil }
 
-func (e *versionedEntity) Version() (string, any) {
+func (e *versionedEntity) VersionField() (string, any) {
 	return "version", e.Ver
 }
 
