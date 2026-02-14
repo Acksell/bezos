@@ -18,10 +18,9 @@ var UserTable = table.TableDefinition{
 		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
 		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
 	},
-	GSIs: []table.TableDefinition{
+	GSIs: []table.GSIDefinition{
 		{
-			Name:  "ByEmail",
-			IsGSI: true,
+			Name: "ByEmail",
 			KeyDefinitions: table.PrimaryKeyDefinition{
 				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
 				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
@@ -34,10 +33,6 @@ var userIndex = index.PrimaryIndex[User]{
 	Table:        UserTable,
 	PartitionKey: keys.Fmt("USER#{id}"),
 	SortKey:      keys.Fmt("PROFILE").Ptr(),
-	// todo do we even need secondary indexes?
-	// Can't we just use GSI table definition directly?
-	// What is a primaryindex on a GSI?
-	// Is this just a way for extracting GSI keys? Do we need that?
 	Secondary: []index.SecondaryIndex{
 		{
 			Name: "ByEmail",

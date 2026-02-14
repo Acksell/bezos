@@ -21,7 +21,7 @@ type UserIndexUtil struct {
 // UserIndex is the typed wrapper for User operations.
 var UserIndex = UserIndexUtil{PrimaryIndex: &userIndex}
 
-// PrimaryKey creates a strongly-typed primary key from explicit parameters.
+// PrimaryKey creates a primary key from explicit parameters.
 func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
@@ -32,7 +32,7 @@ func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
 	}
 }
 
-// PrimaryKeyFrom extracts the primary key from a User entity.
+// PrimaryKeyFrom creates the primary key from a User entity.
 func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
@@ -43,7 +43,7 @@ func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
 	}
 }
 
-// GSIKeysFrom extracts all GSI keys from a User entity.
+// GSIKeysFrom creates all GSI keys from a User entity.
 func (idx UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
 	return []table.PrimaryKey{
 		{
@@ -99,7 +99,7 @@ type OrderIndexUtil struct {
 // OrderIndex is the typed wrapper for Order operations.
 var OrderIndex = OrderIndexUtil{PrimaryIndex: &orderIndex}
 
-// PrimaryKey creates a strongly-typed primary key from explicit parameters.
+// PrimaryKey creates a primary key from explicit parameters.
 func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
@@ -110,7 +110,7 @@ func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.Prim
 	}
 }
 
-// PrimaryKeyFrom extracts the primary key from a Order entity.
+// PrimaryKeyFrom creates the primary key from a Order entity.
 func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
