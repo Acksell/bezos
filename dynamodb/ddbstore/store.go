@@ -27,8 +27,20 @@ type Store struct {
 
 type tableSchema struct {
 	definition table.TableDefinition
-	encoder    *KeyEncoder
-	gsis       map[string]*tableSchema
+	gsis       map[string]*gsiSchema
+}
+
+func (t *tableSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
+	return encodeBadgerKey(t.definition.Name, "", pk)
+}
+
+type gsiSchema struct {
+	tableName  string
+	definition table.GSIDefinition
+}
+
+func (g *gsiSchema) encodeKey(pk table.PrimaryKey) ([]byte, error) {
+	return encodeBadgerKey(g.tableName, g.definition.Name, pk)
 }
 
 // StoreOptions configures the BadgerDB store.
@@ -64,16 +76,15 @@ func New(opts StoreOptions, defs ...table.TableDefinition) (*Store, error) {
 	for _, def := range defs {
 		schema := &tableSchema{
 			definition: def,
-			encoder:    NewKeyEncoder(def.Name, def.KeyDefinitions),
-			gsis:       make(map[string]*tableSchema),
+			gsis:       make(map[string]*gsiSchema),
 		}
 
 		for _, gsiDef := range def.GSIs {
-			gsiSchema := &tableSchema{
+			gsiSch := &gsiSchema{
+				tableName:  def.Name,
 				definition: gsiDef,
-				encoder:    NewGSIKeyEncoder(def.Name, gsiDef.Name, gsiDef.KeyDefinitions),
 			}
-			schema.gsis[gsiDef.Name] = gsiSchema
+			schema.gsis[gsiDef.Name] = gsiSch
 		}
 
 		tables[def.Name] = schema
@@ -101,19 +112,28 @@ func (s *Store) getTable(tableName *string) (*tableSchema, error) {
 	return schema, nil
 }
 
-func (s *Store) getTableAndGSI(tableName *string, indexName *string) (*tableSchema, error) {
+// Used in query/scan to get the appropriate key encoder based on table and index name.
+func (s *Store) getBadgerKeyEncoder(tableName *string, indexName *string) (*badgerKeyEncoder, error) {
 	schema, err := s.getTable(tableName)
 	if err != nil {
 		return nil, err
 	}
 	if indexName == nil || *indexName == "" {
-		return schema, nil
+		return &badgerKeyEncoder{
+			tableName: schema.definition.Name,
+			indexName: "",
+			keyDefs:   schema.definition.KeyDefinitions,
+		}, nil
 	}
 	gsi, ok := schema.gsis[*indexName]
 	if !ok {
 		return nil, fmt.Errorf("GSI not found: %s", *indexName)
 	}
-	return gsi, nil
+	return &badgerKeyEncoder{
+		tableName: gsi.tableName,
+		indexName: gsi.definition.Name,
+		keyDefs:   gsi.definition.KeyDefinitions,
+	}, nil
 }
 
 // GetItem retrieves a single item by its primary key.
@@ -125,17 +145,17 @@ func (s *Store) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optF
 		return nil, fmt.Errorf("key is required")
 	}
 
-	schema, err := s.getTable(params.TableName)
+	t, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
+	pk, err := t.definition.ExtractPrimaryKey(params.Key)
 	if err != nil {
 		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	key, err := schema.encoder.EncodeKey(pk)
+	key, err := t.encodeKey(pk)
 	if err != nil {
 		return nil, fmt.Errorf("encode key: %w", err)
 	}
@@ -180,17 +200,17 @@ func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optF
 		return nil, fmt.Errorf("item is required")
 	}
 
-	schema, err := s.getTable(params.TableName)
+	tabl, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	pk, err := schema.definition.ExtractPrimaryKey(params.Item)
+	pk, err := tabl.definition.ExtractPrimaryKey(params.Item)
 	if err != nil {
 		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	key, err := schema.encoder.EncodeKey(pk)
+	key, err := tabl.encodeKey(pk)
 	if err != nil {
 		return nil, fmt.Errorf("encode key: %w", err)
 	}
@@ -257,7 +277,7 @@ func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optF
 		}
 
 		// Handle GSI updates
-		for _, gsi := range schema.gsis {
+		for _, gsi := range tabl.gsis {
 			if err := s.updateGSI(txn, gsi, params.Item, oldItem); err != nil {
 				return fmt.Errorf("update GSI %s: %w", gsi.definition.Name, err)
 			}
@@ -278,7 +298,7 @@ func (s *Store) PutItem(ctx context.Context, params *dynamodb.PutItemInput, optF
 }
 
 // updateGSI handles GSI maintenance during PutItem.
-func (s *Store) updateGSI(txn *badger.Txn, gsi *tableSchema, newItem, oldItem map[string]types.AttributeValue) error {
+func (s *Store) updateGSI(txn *badger.Txn, gsi *gsiSchema, newItem, oldItem map[string]types.AttributeValue) error {
 	pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
 	skAttr := gsi.definition.KeyDefinitions.SortKey.Name
 
@@ -304,7 +324,7 @@ func (s *Store) updateGSI(txn *badger.Txn, gsi *tableSchema, newItem, oldItem ma
 				// Delete old entry
 				oldGSIPK, err := gsi.definition.ExtractPrimaryKey(oldItem)
 				if err == nil { // Ignore errors - old item might not have had complete GSI key
-					oldKey, err := gsi.encoder.EncodeKey(oldGSIPK)
+					oldKey, err := gsi.encodeKey(oldGSIPK)
 					if err == nil {
 						txn.Delete(oldKey) // Ignore delete errors
 					}
@@ -325,7 +345,7 @@ func (s *Store) updateGSI(txn *badger.Txn, gsi *tableSchema, newItem, oldItem ma
 			return nil // Skip - can't extract key (e.g., wrong type)
 		}
 
-		gsiKey, err := gsi.encoder.EncodeKey(gsiPK)
+		gsiKey, err := gsi.encodeKey(gsiPK)
 		if err != nil {
 			return fmt.Errorf("encode GSI key: %w", err)
 		}
@@ -353,17 +373,17 @@ func (s *Store) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput
 		return nil, fmt.Errorf("key is required")
 	}
 
-	schema, err := s.getTable(params.TableName)
+	tabl, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
+	pk, err := tabl.definition.ExtractPrimaryKey(params.Key)
 	if err != nil {
 		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	key, err := schema.encoder.EncodeKey(pk)
+	key, err := tabl.encodeKey(pk)
 	if err != nil {
 		return nil, fmt.Errorf("encode key: %w", err)
 	}
@@ -410,12 +430,12 @@ func (s *Store) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput
 		}
 
 		// Delete from GSIs
-		for _, gsi := range schema.gsis {
+		for _, gsi := range tabl.gsis {
 			pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
 			if _, hasPK := oldItem[pkAttr]; hasPK {
 				gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem)
 				if err == nil {
-					gsiKey, err := gsi.encoder.EncodeKey(gsiPK)
+					gsiKey, err := gsi.encodeKey(gsiPK)
 					if err == nil {
 						txn.Delete(gsiKey) // Ignore errors
 					}
@@ -446,7 +466,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 		return nil, fmt.Errorf("key condition expression is required")
 	}
 
-	schema, err := s.getTableAndGSI(params.TableName, params.IndexName)
+	badgerEncoder, err := s.getBadgerKeyEncoder(params.TableName, params.IndexName)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +475,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 	keyCond, err := keyconditionexpr.Parse(*params.KeyConditionExpression, keyconditionexpr.ParseParams{
 		ExpressionAttributeNames:  params.ExpressionAttributeNames,
 		ExpressionAttributeValues: params.ExpressionAttributeValues,
-		TableKeys:                 schema.definition.KeyDefinitions,
+		TableKeys:                 badgerEncoder.keyDefs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("parse key condition: %w", err)
@@ -465,7 +485,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 	pkValue := keyCond.PartitionKeyCond.EqualsValue.GetValue()
 
 	// Build the prefix for this partition
-	prefix, err := schema.encoder.EncodePartitionKeyPrefix(pkValue.Value)
+	prefix, err := badgerEncoder.encodePartitionPrefix(pkValue.Value)
 	if err != nil {
 		return nil, fmt.Errorf("encode partition key prefix: %w", err)
 	}
@@ -491,11 +511,11 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 		// Determine start position
 		startKey := prefix
 		if params.ExclusiveStartKey != nil {
-			startPK, err := schema.definition.ExtractPrimaryKey(params.ExclusiveStartKey)
+			startPK, err := badgerEncoder.keyDefs.ExtractPrimaryKey(params.ExclusiveStartKey)
 			if err != nil {
 				return fmt.Errorf("extract start key: %w", err)
 			}
-			startKey, err = schema.encoder.EncodeKey(startPK)
+			startKey, err = badgerEncoder.encodeKey(startPK)
 			if err != nil {
 				return fmt.Errorf("encode start key: %w", err)
 			}
@@ -524,7 +544,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 
 			// Apply sort key condition if present
 			if keyCond.SortKeyCond != nil {
-				matches, err := s.matchesSortKeyCondition(schema, it.Item().Key(), prefix, keyCond.SortKeyCond)
+				matches, err := s.matchesSortKeyCondition(it.Item().Key(), prefix, keyCond.SortKeyCond)
 				if err != nil {
 					return err
 				}
@@ -567,7 +587,7 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 
 			if limit > 0 && len(items) >= limit {
 				// Set LastEvaluatedKey for pagination
-				lastKey = extractKeyAttributes(item, schema.definition.KeyDefinitions)
+				lastKey = extractKeyAttributes(item, badgerEncoder.keyDefs)
 				break
 			}
 
@@ -597,12 +617,12 @@ func (s *Store) Query(ctx context.Context, params *dynamodb.QueryInput, optFns .
 }
 
 // matchesSortKeyCondition checks if a key matches the sort key condition.
-func (s *Store) matchesSortKeyCondition(schema *tableSchema, fullKey, prefix []byte, cond *ast.SortKeyCondition) (bool, error) {
+func (s *Store) matchesSortKeyCondition(fullKey, prefix []byte, cond *ast.SortKeyCondition) (bool, error) {
 	// Extract the sort key portion from the full key
 	skBytes := fullKey[len(prefix):]
 
 	// Decode the sort key value
-	skValue, err := s.decodeSortKeyValue(schema, skBytes)
+	skValue, err := decodeSortKeyValue(skBytes)
 	if err != nil {
 		return false, err
 	}
@@ -633,7 +653,7 @@ func (s *Store) matchesSortKeyCondition(schema *tableSchema, fullKey, prefix []b
 	return true, nil
 }
 
-func (s *Store) decodeSortKeyValue(schema *tableSchema, skBytes []byte) (*ast.KeyValue, error) {
+func decodeSortKeyValue(skBytes []byte) (*ast.KeyValue, error) {
 	if len(skBytes) == 0 {
 		return &ast.KeyValue{}, nil
 	}
@@ -702,7 +722,7 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 		return nil, fmt.Errorf("params is required")
 	}
 
-	schema, err := s.getTableAndGSI(params.TableName, params.IndexName)
+	badgerEncoder, err := s.getBadgerKeyEncoder(params.TableName, params.IndexName)
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +735,7 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 		limit = int(*params.Limit)
 	}
 
-	prefix := schema.encoder.TablePrefix()
+	prefix := badgerEncoder.tablePrefix()
 
 	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -726,11 +746,11 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 
 		// Handle pagination
 		if params.ExclusiveStartKey != nil {
-			startPK, err := schema.definition.ExtractPrimaryKey(params.ExclusiveStartKey)
+			startPK, err := badgerEncoder.keyDefs.ExtractPrimaryKey(params.ExclusiveStartKey)
 			if err != nil {
 				return fmt.Errorf("extract start key: %w", err)
 			}
-			startKey, err := schema.encoder.EncodeKey(startPK)
+			startKey, err := badgerEncoder.encodeKey(startPK)
 			if err != nil {
 				return fmt.Errorf("encode start key: %w", err)
 			}
@@ -775,7 +795,7 @@ func (s *Store) Scan(ctx context.Context, params *dynamodb.ScanInput, optFns ...
 			items = append(items, item)
 
 			if limit > 0 && len(items) >= limit {
-				lastKey = extractKeyAttributes(item, schema.definition.KeyDefinitions)
+				lastKey = extractKeyAttributes(item, badgerEncoder.keyDefs)
 				break
 			}
 
@@ -816,17 +836,17 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 		return nil, fmt.Errorf("UpdateExpression is required")
 	}
 
-	schema, err := s.getTable(params.TableName)
+	tabl, err := s.getTable(params.TableName)
 	if err != nil {
 		return nil, err
 	}
 
-	pk, err := schema.definition.ExtractPrimaryKey(params.Key)
+	pk, err := tabl.definition.ExtractPrimaryKey(params.Key)
 	if err != nil {
 		return nil, fmt.Errorf("extract primary key: %w", err)
 	}
 
-	key, err := schema.encoder.EncodeKey(pk)
+	key, err := tabl.encodeKey(pk)
 	if err != nil {
 		return nil, fmt.Errorf("encode key: %w", err)
 	}
@@ -905,7 +925,7 @@ func (s *Store) UpdateItem(ctx context.Context, params *dynamodb.UpdateItemInput
 		}
 
 		// Handle GSI updates
-		for _, gsi := range schema.gsis {
+		for _, gsi := range tabl.gsis {
 			if err := s.updateGSI(txn, gsi, evalOutput.Item, oldItem); err != nil {
 				return err
 			}
@@ -948,18 +968,18 @@ func (s *Store) BatchGetItem(ctx context.Context, params *dynamodb.BatchGetItemI
 
 	err := s.db.View(func(txn *badger.Txn) error {
 		for tableName, keysAndAttrs := range params.RequestItems {
-			schema, err := s.getTable(&tableName)
+			tabl, err := s.getTable(&tableName)
 			if err != nil {
 				return err
 			}
 
 			for _, keyAttrs := range keysAndAttrs.Keys {
-				pk, err := schema.definition.ExtractPrimaryKey(keyAttrs)
+				pk, err := tabl.definition.ExtractPrimaryKey(keyAttrs)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1012,7 +1032,7 @@ func (s *Store) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteI
 
 	err := s.db.Update(func(txn *badger.Txn) error {
 		for tableName, writeRequests := range params.RequestItems {
-			schema, err := s.getTable(&tableName)
+			tabl, err := s.getTable(&tableName)
 			if err != nil {
 				return err
 			}
@@ -1020,13 +1040,13 @@ func (s *Store) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteI
 			for _, req := range writeRequests {
 				switch {
 				case req.PutRequest != nil:
-					pk, err := schema.definition.ExtractPrimaryKey(req.PutRequest.Item)
+					pk, err := tabl.definition.ExtractPrimaryKey(req.PutRequest.Item)
 					if err != nil {
 						unprocessed[tableName] = append(unprocessed[tableName], req)
 						continue
 					}
 
-					key, err := schema.encoder.EncodeKey(pk)
+					key, err := tabl.encodeKey(pk)
 					if err != nil {
 						unprocessed[tableName] = append(unprocessed[tableName], req)
 						continue
@@ -1053,18 +1073,18 @@ func (s *Store) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteI
 					}
 
 					// Update GSIs
-					for _, gsi := range schema.gsis {
+					for _, gsi := range tabl.gsis {
 						s.updateGSI(txn, gsi, req.PutRequest.Item, oldItem)
 					}
 
 				case req.DeleteRequest != nil:
-					pk, err := schema.definition.ExtractPrimaryKey(req.DeleteRequest.Key)
+					pk, err := tabl.definition.ExtractPrimaryKey(req.DeleteRequest.Key)
 					if err != nil {
 						unprocessed[tableName] = append(unprocessed[tableName], req)
 						continue
 					}
 
-					key, err := schema.encoder.EncodeKey(pk)
+					key, err := tabl.encodeKey(pk)
 					if err != nil {
 						unprocessed[tableName] = append(unprocessed[tableName], req)
 						continue
@@ -1086,11 +1106,11 @@ func (s *Store) BatchWriteItem(ctx context.Context, params *dynamodb.BatchWriteI
 
 					// Delete from GSIs
 					if oldItem != nil {
-						for _, gsi := range schema.gsis {
+						for _, gsi := range tabl.gsis {
 							pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
 							if _, hasPK := oldItem[pkAttr]; hasPK {
 								if gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem); err == nil {
-									if gsiKey, err := gsi.encoder.EncodeKey(gsiPK); err == nil {
+									if gsiKey, err := gsi.encodeKey(gsiPK); err == nil {
 										txn.Delete(gsiKey)
 									}
 								}
@@ -1134,17 +1154,17 @@ func (s *Store) TransactGetItems(ctx context.Context, params *dynamodb.TransactG
 				return fmt.Errorf("empty transact get item request")
 			}
 
-			schema, err := s.getTable(item.Get.TableName)
+			tabl, err := s.getTable(item.Get.TableName)
 			if err != nil {
 				return err
 			}
 
-			pk, err := schema.definition.ExtractPrimaryKey(item.Get.Key)
+			pk, err := tabl.definition.ExtractPrimaryKey(item.Get.Key)
 			if err != nil {
 				return err
 			}
 
-			key, err := schema.encoder.EncodeKey(pk)
+			key, err := tabl.encodeKey(pk)
 			if err != nil {
 				return err
 			}
@@ -1199,17 +1219,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 			switch {
 			case item.Put != nil:
 				if item.Put.ConditionExpression != nil {
-					schema, err := s.getTable(item.Put.TableName)
+					tabl, err := s.getTable(item.Put.TableName)
 					if err != nil {
 						return err
 					}
 
-					pk, err := schema.definition.ExtractPrimaryKey(item.Put.Item)
+					pk, err := tabl.definition.ExtractPrimaryKey(item.Put.Item)
 					if err != nil {
 						return err
 					}
 
-					key, err := schema.encoder.EncodeKey(pk)
+					key, err := tabl.encodeKey(pk)
 					if err != nil {
 						return err
 					}
@@ -1239,17 +1259,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 
 			case item.Delete != nil:
 				if item.Delete.ConditionExpression != nil {
-					schema, err := s.getTable(item.Delete.TableName)
+					tabl, err := s.getTable(item.Delete.TableName)
 					if err != nil {
 						return err
 					}
 
-					pk, err := schema.definition.ExtractPrimaryKey(item.Delete.Key)
+					pk, err := tabl.definition.ExtractPrimaryKey(item.Delete.Key)
 					if err != nil {
 						return err
 					}
 
-					key, err := schema.encoder.EncodeKey(pk)
+					key, err := tabl.encodeKey(pk)
 					if err != nil {
 						return err
 					}
@@ -1278,17 +1298,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 			case item.ConditionCheck != nil:
-				schema, err := s.getTable(item.ConditionCheck.TableName)
+				tabl, err := s.getTable(item.ConditionCheck.TableName)
 				if err != nil {
 					return err
 				}
 
-				pk, err := schema.definition.ExtractPrimaryKey(item.ConditionCheck.Key)
+				pk, err := tabl.definition.ExtractPrimaryKey(item.ConditionCheck.Key)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1316,17 +1336,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 			case item.Update != nil:
-				schema, err := s.getTable(item.Update.TableName)
+				tabl, err := s.getTable(item.Update.TableName)
 				if err != nil {
 					return err
 				}
 
-				pk, err := schema.definition.ExtractPrimaryKey(item.Update.Key)
+				pk, err := tabl.definition.ExtractPrimaryKey(item.Update.Key)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1362,17 +1382,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 		for _, item := range params.TransactItems {
 			switch {
 			case item.Put != nil:
-				schema, err := s.getTable(item.Put.TableName)
+				tabl, err := s.getTable(item.Put.TableName)
 				if err != nil {
 					return err
 				}
 
-				pk, err := schema.definition.ExtractPrimaryKey(item.Put.Item)
+				pk, err := tabl.definition.ExtractPrimaryKey(item.Put.Item)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1396,24 +1416,24 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 				// Update GSIs
-				for _, gsi := range schema.gsis {
+				for _, gsi := range tabl.gsis {
 					if err := s.updateGSI(txn, gsi, item.Put.Item, oldItem); err != nil {
 						return err
 					}
 				}
 
 			case item.Delete != nil:
-				schema, err := s.getTable(item.Delete.TableName)
+				tabl, err := s.getTable(item.Delete.TableName)
 				if err != nil {
 					return err
 				}
 
-				pk, err := schema.definition.ExtractPrimaryKey(item.Delete.Key)
+				pk, err := tabl.definition.ExtractPrimaryKey(item.Delete.Key)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1433,11 +1453,11 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 
 				// Delete from GSIs
 				if oldItem != nil {
-					for _, gsi := range schema.gsis {
+					for _, gsi := range tabl.gsis {
 						pkAttr := gsi.definition.KeyDefinitions.PartitionKey.Name
 						if _, hasPK := oldItem[pkAttr]; hasPK {
 							if gsiPK, err := gsi.definition.ExtractPrimaryKey(oldItem); err == nil {
-								if gsiKey, err := gsi.encoder.EncodeKey(gsiPK); err == nil {
+								if gsiKey, err := gsi.encodeKey(gsiPK); err == nil {
 									txn.Delete(gsiKey)
 								}
 							}
@@ -1449,17 +1469,17 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				// Already validated, nothing to write
 
 			case item.Update != nil:
-				schema, err := s.getTable(item.Update.TableName)
+				tabl, err := s.getTable(item.Update.TableName)
 				if err != nil {
 					return err
 				}
 
-				pk, err := schema.definition.ExtractPrimaryKey(item.Update.Key)
+				pk, err := tabl.definition.ExtractPrimaryKey(item.Update.Key)
 				if err != nil {
 					return err
 				}
 
-				key, err := schema.encoder.EncodeKey(pk)
+				key, err := tabl.encodeKey(pk)
 				if err != nil {
 					return err
 				}
@@ -1509,7 +1529,7 @@ func (s *Store) TransactWriteItems(ctx context.Context, params *dynamodb.Transac
 				}
 
 				// Update GSIs
-				for _, gsi := range schema.gsis {
+				for _, gsi := range tabl.gsis {
 					if err := s.updateGSI(txn, gsi, evalOutput.Item, oldItem); err != nil {
 						return err
 					}

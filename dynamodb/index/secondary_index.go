@@ -42,24 +42,6 @@ func (si SecondaryIndex) KeyDefinition() table.PrimaryKeyDefinition {
 	return keyDef
 }
 
-// ToTableDefinition returns a table.TableDefinition representing this GSI.
-// This is for compatibility with existing code that treats GSIs as tables.
-func (si SecondaryIndex) ToTableDefinition(parentTable table.TableDefinition) table.TableDefinition {
-	keyDef := table.PrimaryKeyDefinition{
-		PartitionKey: si.Partition.KeyDef,
-	}
-	if si.Sort != nil {
-		keyDef.SortKey = si.Sort.KeyDef
-	}
-
-	return table.TableDefinition{
-		Name:           parentTable.Name,
-		KeyDefinitions: keyDef,
-		TimeToLiveKey:  parentTable.TimeToLiveKey,
-		IsGSI:          true,
-	}
-}
-
 // Validate checks that the SecondaryIndex is properly configured.
 func (si SecondaryIndex) Validate() error {
 	if si.Name == "" {

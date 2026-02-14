@@ -164,32 +164,3 @@ func TestSecondaryIndex_KeyDefinition(t *testing.T) {
 		t.Errorf("SortKey.Kind = %q, want %q", keyDef.SortKey.Kind, table.KeyKindN)
 	}
 }
-
-func TestSecondaryIndex_ToTableDefinition(t *testing.T) {
-	parentTable := table.TableDefinition{
-		Name:          "Users",
-		TimeToLiveKey: "ttl",
-	}
-
-	gsi := SecondaryIndex{
-		Name: "ByEmail",
-		Partition: KeyValDef{
-			KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			ValDef: keys.Fmt("EMAIL#{email}"),
-		},
-	}
-
-	tableDef := gsi.ToTableDefinition(parentTable)
-	if tableDef.Name != "Users" {
-		t.Errorf("Name = %q, want %q", tableDef.Name, "Users")
-	}
-	if !tableDef.IsGSI {
-		t.Error("IsGSI should be true")
-	}
-	if tableDef.TimeToLiveKey != "ttl" {
-		t.Errorf("TimeToLiveKey = %q, want %q", tableDef.TimeToLiveKey, "ttl")
-	}
-	if tableDef.KeyDefinitions.PartitionKey.Name != "gsi1pk" {
-		t.Errorf("KeyDefinitions.PartitionKey.Name = %q, want %q", tableDef.KeyDefinitions.PartitionKey.Name, "gsi1pk")
-	}
-}

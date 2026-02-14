@@ -20,10 +20,9 @@ var singleTableDesign = table.TableDefinition{
 		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
 		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
 	},
-	GSIs: []table.TableDefinition{
+	GSIs: []table.GSIDefinition{
 		{
-			IsGSI: true,
-			Name:  "gsi1",
+			Name: "gsi1",
 			KeyDefinitions: table.PrimaryKeyDefinition{
 				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
 				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},

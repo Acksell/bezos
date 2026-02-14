@@ -10,34 +10,46 @@ type TableDefinition struct {
 	Name           string
 	KeyDefinitions PrimaryKeyDefinition
 	TimeToLiveKey  string
-	IsGSI          bool
-	// todo make interface instead? "IsGSI" is begging for inconsistencies, needs type safety instead, whilst still being able to treat GSIs as tables in code.
-	GSIs []TableDefinition
+	GSIs           []GSIDefinition
 }
 
-// todo not sure if this should be in this package. I don't see the immediate benefit. The use case is mostly internal.
+// GSIDefinition represents a Global Secondary Index definition.
+type GSIDefinition struct {
+	Name           string
+	KeyDefinitions PrimaryKeyDefinition
+}
+
+// ExtractPrimaryKey extracts the primary key values from a document.
+func (g GSIDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
+	return g.KeyDefinitions.ExtractPrimaryKey(doc)
+}
+
 func (t TableDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
-	part, ok := doc[t.KeyDefinitions.PartitionKey.Name]
+	return t.KeyDefinitions.ExtractPrimaryKey(doc)
+}
+
+func (k PrimaryKeyDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
+	part, ok := doc[k.PartitionKey.Name]
 	if !ok {
 		return PrimaryKey{}, fmt.Errorf("partition key not found")
 	}
-	if err := attributeMatchesDefinition(t.KeyDefinitions.PartitionKey.Kind, part); err != nil {
+	if err := attributeMatchesDefinition(k.PartitionKey.Kind, part); err != nil {
 		return PrimaryKey{}, fmt.Errorf("partition key kind does not match definition")
 	}
 	pk := PrimaryKey{
-		Definition: t.KeyDefinitions,
+		Definition: k,
 		Values: PrimaryKeyValues{
 			PartitionKey: keyValueFromAV(part),
 		},
 	}
-	if t.KeyDefinitions.SortKey.Name == "" {
+	if k.SortKey.Name == "" {
 		return pk, nil
 	}
-	sort, ok := doc[t.KeyDefinitions.SortKey.Name]
+	sort, ok := doc[k.SortKey.Name]
 	if !ok {
 		return PrimaryKey{}, fmt.Errorf("sort key not found")
 	}
-	if err := attributeMatchesDefinition(t.KeyDefinitions.SortKey.Kind, sort); err != nil {
+	if err := attributeMatchesDefinition(k.SortKey.Kind, sort); err != nil {
 		return PrimaryKey{}, fmt.Errorf("sort key kind does not match definition")
 	}
 	pk.Values.SortKey = keyValueFromAV(sort)

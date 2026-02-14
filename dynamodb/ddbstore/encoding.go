@@ -34,41 +34,36 @@ const (
 	keyTypeBinary byte = 'B'
 )
 
-// KeyEncoder handles encoding and decoding of DynamoDB keys for BadgerDB.
-type KeyEncoder struct {
+// badgerKeyEncoder provides encoding helpers for Query/Scan on either a table or GSI.
+type badgerKeyEncoder struct {
 	tableName string
-	gsiName   string // empty for main table
-	keyDef    table.PrimaryKeyDefinition
+	indexName string // empty for base table
+	keyDefs   table.PrimaryKeyDefinition
 }
 
-// NewKeyEncoder creates a new encoder for the given table.
-func NewKeyEncoder(tableName string, keyDef table.PrimaryKeyDefinition) *KeyEncoder {
-	return &KeyEncoder{
-		tableName: tableName,
-		keyDef:    keyDef,
-	}
+func (e *badgerKeyEncoder) encodeKey(pk table.PrimaryKey) ([]byte, error) {
+	return encodeBadgerKey(e.tableName, e.indexName, pk)
 }
 
-// NewGSIKeyEncoder creates a new encoder for a GSI.
-func NewGSIKeyEncoder(tableName, gsiName string, keyDef table.PrimaryKeyDefinition) *KeyEncoder {
-	return &KeyEncoder{
-		tableName: tableName,
-		gsiName:   gsiName,
-		keyDef:    keyDef,
-	}
+func (e *badgerKeyEncoder) encodePartitionPrefix(val any) ([]byte, error) {
+	return encodeBadgerPartitionPrefix(e.tableName, e.indexName, e.keyDefs.PartitionKey.Kind, val)
 }
 
-// EncodeKey encodes a primary key into a BadgerDB key.
-func (e *KeyEncoder) EncodeKey(pk table.PrimaryKey) ([]byte, error) {
+func (e *badgerKeyEncoder) tablePrefix() []byte {
+	return badgerTablePrefix(e.tableName, e.indexName)
+}
+
+// encodeBadgerKey encodes a primary key into a BadgerDB key.
+func encodeBadgerKey(tableName, gsiName string, pk table.PrimaryKey) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// Write table prefix
-	buf.WriteString(e.tableName)
+	buf.WriteString(tableName)
 
 	// Write GSI marker if applicable
-	if e.gsiName != "" {
+	if gsiName != "" {
 		buf.WriteString(gsiMarker)
-		buf.WriteString(e.gsiName)
+		buf.WriteString(gsiName)
 	}
 	buf.WriteByte(keySeparator)
 
@@ -92,18 +87,18 @@ func (e *KeyEncoder) EncodeKey(pk table.PrimaryKey) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// EncodePartitionKeyPrefix returns a prefix for scanning all items with a given partition key.
-func (e *KeyEncoder) EncodePartitionKeyPrefix(partitionKey any) ([]byte, error) {
+// encodeBadgerPartitionPrefix returns a prefix for scanning all items with a given partition key.
+func encodeBadgerPartitionPrefix(tableName, gsiName string, pkKind table.KeyKind, partitionKey any) ([]byte, error) {
 	var buf bytes.Buffer
 
-	buf.WriteString(e.tableName)
-	if e.gsiName != "" {
+	buf.WriteString(tableName)
+	if gsiName != "" {
 		buf.WriteString(gsiMarker)
-		buf.WriteString(e.gsiName)
+		buf.WriteString(gsiName)
 	}
 	buf.WriteByte(keySeparator)
 
-	pkBytes, err := encodeKeyValue(partitionKey, e.keyDef.PartitionKey.Kind)
+	pkBytes, err := encodeKeyValue(partitionKey, pkKind)
 	if err != nil {
 		return nil, fmt.Errorf("encode partition key: %w", err)
 	}
@@ -113,18 +108,13 @@ func (e *KeyEncoder) EncodePartitionKeyPrefix(partitionKey any) ([]byte, error) 
 	return buf.Bytes(), nil
 }
 
-// EncodeSortKeyValue encodes a sort key value for range comparisons.
-func (e *KeyEncoder) EncodeSortKeyValue(sortKey any) ([]byte, error) {
-	return encodeKeyValue(sortKey, e.keyDef.SortKey.Kind)
-}
-
-// TablePrefix returns the prefix for all keys in this table/GSI.
-func (e *KeyEncoder) TablePrefix() []byte {
+// badgerTablePrefix returns the prefix for all keys in a table/GSI.
+func badgerTablePrefix(tableName, gsiName string) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(e.tableName)
-	if e.gsiName != "" {
+	buf.WriteString(tableName)
+	if gsiName != "" {
 		buf.WriteString(gsiMarker)
-		buf.WriteString(e.gsiName)
+		buf.WriteString(gsiName)
 	}
 	buf.WriteByte(keySeparator)
 	return buf.Bytes()
