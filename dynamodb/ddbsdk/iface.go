@@ -41,11 +41,13 @@ type Reader interface {
 }
 
 type Txer interface {
-	AddAction(Action)
+	AddAction(...Action)
 	Commit(context.Context) error
 }
 
 type Batcher interface {
+	// AddAction appends one or more actions to the batch.
+	// Batch only supports Put and Delete actions, without conditions.
 	AddAction(...BatchAction)
 	Exec(context.Context) (ExecResult, error)
 	ExecAndRetry(context.Context) error

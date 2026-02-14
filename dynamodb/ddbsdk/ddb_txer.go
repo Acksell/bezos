@@ -37,13 +37,15 @@ type txer struct {
 	errs    []error // errors from AddAction, checked in Commit
 }
 
-func (tx *txer) AddAction(a Action) {
-	key := actionKey{tableName: *a.TableName(), primaryKey: a.PrimaryKey()}
-	if _, found := tx.actions[key]; found {
-		tx.errs = append(tx.errs, fmt.Errorf("an action already exists for table %s, primary key: %v", *a.TableName(), a.PrimaryKey()))
-		return
+func (tx *txer) AddAction(actions ...Action) {
+	for _, action := range actions {
+		key := actionKey{tableName: *action.TableName(), primaryKey: action.PrimaryKey()}
+		if _, found := tx.actions[key]; found {
+			tx.errs = append(tx.errs, fmt.Errorf("an action already exists for table %s, primary key: %v", *action.TableName(), action.PrimaryKey()))
+			continue
+		}
+		tx.actions[key] = action
 	}
-	tx.actions[key] = a
 }
 
 func (tx *txer) Commit(ctx context.Context) error {

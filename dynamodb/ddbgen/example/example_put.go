@@ -40,10 +40,11 @@ func main() {
 
 	// tx
 	tx := db.NewTx()
-	tx.AddAction(UserIndex.UnsafePut(user))
 	tx.AddAction(
-		UserIndex.UnsafeUpdate(user.UserID).AddOp(ddbsdk.SetFieldOp("name", "Jane Doe")))
-	tx.AddAction(UserIndex.Delete(user.UserID))
+		UserIndex.UnsafePut(user),
+		UserIndex.UnsafeUpdate(user.UserID).AddOp(ddbsdk.SetFieldOp("name", "Jane Doe")),
+		UserIndex.Delete(user.UserID),
+	)
 	if err := tx.Commit(context.Background()); err != nil {
 		panic(fmt.Sprintf("failed to commit transaction: %v", err))
 	}
@@ -54,7 +55,8 @@ func main() {
 		ddbsdk.Equals("admin@example.com")))
 
 	batch := db.NewBatch()
-	batch.AddAction(UserIndex.UnsafePut(user))
-	batch.AddAction(UserIndex.UnsafePut(user))
-	batch.AddAction(UserIndex.Delete(user.UserID))
+	batch.AddAction(
+		UserIndex.UnsafePut(user),
+		UserIndex.UnsafePut(user),
+		UserIndex.Delete(user.UserID))
 }
