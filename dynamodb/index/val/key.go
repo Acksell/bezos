@@ -1,4 +1,4 @@
-package keys
+package val
 
 import (
 	"golang.org/x/exp/constraints"

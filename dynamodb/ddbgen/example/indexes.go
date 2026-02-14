@@ -8,7 +8,7 @@ package example
 
 import (
 	"github.com/acksell/bezos/dynamodb/index"
-	"github.com/acksell/bezos/dynamodb/index/keys"
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 
@@ -31,18 +31,18 @@ var UserTable = table.TableDefinition{
 
 var userIndex = index.PrimaryIndex[User]{
 	Table:        UserTable,
-	PartitionKey: keys.Fmt("USER#{id}"),
-	SortKey:      keys.Fmt("PROFILE").Ptr(),
+	PartitionKey: val.Fmt("USER#{id}"),
+	SortKey:      val.Fmt("PROFILE").Ptr(),
 	Secondary: []index.SecondaryIndex{
 		{
 			Name: "ByEmail",
 			Partition: index.KeyValDef{
 				KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-				ValDef: keys.Fmt("EMAIL#{email}"),
+				ValDef: val.Fmt("EMAIL#{email}"),
 			},
 			Sort: &index.KeyValDef{
 				KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-				ValDef: keys.Fmt("USER#{id}"),
+				ValDef: val.Fmt("USER#{id}"),
 			},
 		},
 	},
@@ -58,6 +58,6 @@ var OrderTable = table.TableDefinition{
 
 var orderIndex = index.PrimaryIndex[Order]{
 	Table:        OrderTable,
-	PartitionKey: keys.Fmt("TENANT#{tenantID}"),
-	SortKey:      keys.Fmt("ORDER#{orderID}").Ptr(),
+	PartitionKey: val.Fmt("TENANT#{tenantID}"),
+	SortKey:      val.Fmt("ORDER#{orderID}").Ptr(),
 }

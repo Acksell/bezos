@@ -3,7 +3,7 @@ package index
 import (
 	"testing"
 
-	"github.com/acksell/bezos/dynamodb/index/keys"
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 
@@ -28,8 +28,8 @@ func TestPrimaryIndex_Validate(t *testing.T) {
 						SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
 					},
 				},
-				PartitionKey: keys.Fmt("USER#{id}"),
-				SortKey:      keys.Fmt("PROFILE").Ptr(),
+				PartitionKey: val.Fmt("USER#{id}"),
+				SortKey:      val.Fmt("PROFILE").Ptr(),
 			},
 			wantErr: false,
 		},
@@ -42,14 +42,14 @@ func TestPrimaryIndex_Validate(t *testing.T) {
 						PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
 					},
 				},
-				PartitionKey: keys.Fmt("USER#{id}"),
+				PartitionKey: val.Fmt("USER#{id}"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing table name",
 			idx: PrimaryIndex[TestEntity]{
-				PartitionKey: keys.Fmt("USER#{id}"),
+				PartitionKey: val.Fmt("USER#{id}"),
 			},
 			wantErr: true,
 		},
@@ -93,7 +93,7 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 				Name: "ByEmail",
 				Partition: KeyValDef{
 					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-					ValDef: keys.Fmt("EMAIL#{email}"),
+					ValDef: val.Fmt("EMAIL#{email}"),
 				},
 			},
 			wantErr: false,
@@ -104,11 +104,11 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 				Name: "ByEmail",
 				Partition: KeyValDef{
 					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-					ValDef: keys.Fmt("EMAIL#{email}"),
+					ValDef: val.Fmt("EMAIL#{email}"),
 				},
 				Sort: &KeyValDef{
 					KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-					ValDef: keys.Fmt("USER#{id}"),
+					ValDef: val.Fmt("USER#{id}"),
 				},
 			},
 			wantErr: false,
@@ -123,7 +123,7 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 			gsi: SecondaryIndex{
 				Name: "ByEmail",
 				Partition: KeyValDef{
-					ValDef: keys.Fmt("EMAIL#{email}"),
+					ValDef: val.Fmt("EMAIL#{email}"),
 				},
 			},
 			wantErr: true,
@@ -145,11 +145,11 @@ func TestSecondaryIndex_KeyDefinition(t *testing.T) {
 		Name: "ByEmail",
 		Partition: KeyValDef{
 			KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			ValDef: keys.Fmt("EMAIL#{email}"),
+			ValDef: val.Fmt("EMAIL#{email}"),
 		},
 		Sort: &KeyValDef{
 			KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindN},
-			ValDef: keys.FromField("timestamp"),
+			ValDef: val.FromField("timestamp"),
 		},
 	}
 

@@ -1,9 +1,9 @@
-package keys_test
+package val_test
 
 import (
 	"testing"
 
-	"github.com/acksell/bezos/dynamodb/index/keys"
+	"github.com/acksell/bezos/dynamodb/index/val"
 )
 
 func TestFmt(t *testing.T) {
@@ -20,7 +20,7 @@ func TestFmt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := keys.Fmt(tt.pattern)
+			v := val.Fmt(tt.pattern)
 			if v.Format == nil {
 				t.Fatal("Format should not be nil")
 			}
@@ -48,7 +48,7 @@ func TestFmt_Panics(t *testing.T) {
 					t.Errorf("Fmt(%q) did not panic", tt.pattern)
 				}
 			}()
-			keys.Fmt(tt.pattern)
+			val.Fmt(tt.pattern)
 		})
 	}
 }
@@ -66,7 +66,7 @@ func TestFmtSpec_IsConstant(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
-			v := keys.Fmt(tt.pattern)
+			v := val.Fmt(tt.pattern)
 			if got := v.Format.IsConstant(); got != tt.want {
 				t.Errorf("IsConstant() = %v, want %v", got, tt.want)
 			}
@@ -75,12 +75,12 @@ func TestFmtSpec_IsConstant(t *testing.T) {
 }
 
 func TestValDef_IsZero(t *testing.T) {
-	var zero keys.ValDef
+	var zero val.ValDef
 	if !zero.IsZero() {
 		t.Error("zero value should be zero")
 	}
 
-	v := keys.Fmt("USER#{id}")
+	v := val.Fmt("USER#{id}")
 	if v.IsZero() {
 		t.Error("initialized value should not be zero")
 	}
@@ -100,7 +100,7 @@ func TestFmtSpec_FieldRefs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
-			v := keys.Fmt(tt.pattern)
+			v := val.Fmt(tt.pattern)
 			got := v.Format.FieldRefs()
 			if len(got) != len(tt.want) {
 				t.Errorf("FieldRefs() = %v, want %v", got, tt.want)
@@ -128,7 +128,7 @@ func TestFmtSpec_FieldPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
-			v := keys.Fmt(tt.pattern)
+			v := val.Fmt(tt.pattern)
 			got := v.Format.FieldPaths()
 			if len(got) != len(tt.want) {
 				t.Errorf("FieldPaths() len = %d, want %d", len(got), len(tt.want))
@@ -150,7 +150,7 @@ func TestFmtSpec_FieldPaths(t *testing.T) {
 }
 
 func TestValDef_Ptr(t *testing.T) {
-	v := keys.Fmt("PROFILE")
+	v := val.Fmt("PROFILE")
 	ptr := v.Ptr()
 	if ptr == nil {
 		t.Error("Ptr() should not return nil")
@@ -162,7 +162,7 @@ func TestValDef_Ptr(t *testing.T) {
 
 func TestConstantConstructors(t *testing.T) {
 	t.Run("String", func(t *testing.T) {
-		v := keys.String("PROFILE")
+		v := val.String("PROFILE")
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}
@@ -172,7 +172,7 @@ func TestConstantConstructors(t *testing.T) {
 	})
 
 	t.Run("Number", func(t *testing.T) {
-		v := keys.Number(42)
+		v := val.Number(42)
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}
@@ -183,14 +183,14 @@ func TestConstantConstructors(t *testing.T) {
 
 	t.Run("Bytes", func(t *testing.T) {
 		data := []byte{1, 2, 3}
-		v := keys.Bytes(data)
+		v := val.Bytes(data)
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}
 	})
 
 	t.Run("FromField", func(t *testing.T) {
-		v := keys.FromField("email")
+		v := val.FromField("email")
 		if v.FromField != "email" {
 			t.Errorf("FromField = %q, want %q", v.FromField, "email")
 		}

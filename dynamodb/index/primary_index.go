@@ -3,7 +3,7 @@ package index
 import (
 	"fmt"
 
-	"github.com/acksell/bezos/dynamodb/index/keys"
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 
@@ -14,16 +14,16 @@ import (
 //
 //	var UsersIndex = index.PrimaryIndex[User]{
 //	    Table:        UsersTable,
-//	    PartitionKey: keys.Fmt("USER#{id}"),
-//	    SortKey:      keys.Fmt("PROFILE").Ptr(),
+//	    PartitionKey: val.Fmt("USER#{id}"),
+//	    SortKey:      val.Fmt("PROFILE").Ptr(),
 //	}
 type PrimaryIndex[E any] struct {
 	// Table is the underlying table definition (contains key definitions)
 	Table table.TableDefinition
 	// PartitionKey is the value definition for the partition key
-	PartitionKey keys.ValDef
+	PartitionKey val.ValDef
 	// SortKey is the value definition for the sort key (nil if no sort key)
-	SortKey *keys.ValDef
+	SortKey *val.ValDef
 	// Secondary are the Global Secondary Indexes associated with this table
 	Secondary []SecondaryIndex
 }

@@ -387,9 +387,9 @@ func extractStringLiteral(expr ast.Expr) string {
 	return s
 }
 
-// extractFmtPattern extracts a pattern string from keys.Fmt("...") or keys.Fmt("...").Ptr()
+// extractFmtPattern extracts a pattern string from val.Fmt("...") or val.Fmt("...").Ptr()
 func extractFmtPattern(expr ast.Expr) string {
-	// Handle keys.Fmt("...").Ptr() - a call expression where Fun is a selector
+	// Handle val.Fmt("...").Ptr() - a call expression where Fun is a selector
 	if call, ok := expr.(*ast.CallExpr); ok {
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 			// Check if this is a .Ptr() call
@@ -397,8 +397,8 @@ func extractFmtPattern(expr ast.Expr) string {
 				// Recursively get pattern from the inner expression
 				return extractFmtPattern(sel.X)
 			}
-			// Check if this is keys.Fmt("...") - selector on package name
-			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "keys" && sel.Sel.Name == "Fmt" {
+			// Check if this is val.Fmt("...") - selector on package name
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "val" && sel.Sel.Name == "Fmt" {
 				if len(call.Args) == 1 {
 					return extractStringLiteral(call.Args[0])
 				}

@@ -1,7 +1,7 @@
 package index
 
 import (
-	"github.com/acksell/bezos/dynamodb/index/keys"
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 
@@ -12,21 +12,21 @@ import (
 //	// Using a format pattern:
 //	index.KeyValDef{
 //	    KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-//	    ValDef: keys.Fmt("EMAIL#{email}"),
+//	    ValDef: val.Fmt("EMAIL#{email}"),
 //	}
 //
 //	// Copying from an existing field:
 //	index.KeyValDef{
 //	    KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-//	    ValDef: keys.FromField("email"),
+//	    ValDef: val.FromField("email"),
 //	}
 //
 //	// Using a constant value:
 //	index.KeyValDef{
 //	    KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-//	    ValDef: keys.String("PROFILE"),
+//	    ValDef: val.String("PROFILE"),
 //	}
 type KeyValDef struct {
 	KeyDef table.KeyDef
-	ValDef keys.ValDef
+	ValDef val.ValDef
 }
