@@ -133,7 +133,7 @@ func Discover(dir string) (*DiscoverResult, error) {
 				}
 
 				// Parse the composite literal to extract key patterns
-				indexInfo, err := parseIndexLiteral(varName, entityType, valueSpec.Values[0])
+				indexInfo, err := parseIndexLiteral(varName, entityType, valueSpec.Values[0], pkg.Syntax)
 				if err != nil {
 					return nil, fmt.Errorf("parsing index %s: %w", varName, err)
 				}
@@ -196,7 +196,7 @@ func extractPrimaryIndexEntityType(t types.Type) string {
 }
 
 // parseIndexLiteral extracts key patterns from a PrimaryIndex composite literal.
-func parseIndexLiteral(varName, entityType string, expr ast.Expr) (IndexInfo, error) {
+func parseIndexLiteral(varName, entityType string, expr ast.Expr, files []*ast.File) (IndexInfo, error) {
 	info := IndexInfo{
 		VarName:    varName,
 		EntityType: entityType,
@@ -212,6 +212,7 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr) (IndexInfo, er
 		return info, fmt.Errorf("expected composite literal, got %T", expr)
 	}
 
+	var tableExpr ast.Expr
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
@@ -224,6 +225,8 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr) (IndexInfo, er
 		}
 
 		switch key.Name {
+		case "Table":
+			tableExpr = kv.Value
 		case "PartitionKey":
 			if str := extractFmtPattern(kv.Value); str != "" {
 				info.PartitionKey = str
@@ -233,7 +236,7 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr) (IndexInfo, er
 				info.SortKey = str
 			}
 		case "Secondary":
-			gsis, err := parseSecondarySlice(kv.Value)
+			gsis, err := parseSecondarySlice(kv.Value, tableExpr, files)
 			if err != nil {
 				return info, fmt.Errorf("parsing Secondary: %w", err)
 			}
@@ -249,15 +252,18 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr) (IndexInfo, er
 }
 
 // parseSecondarySlice parses a []SecondaryIndex composite literal.
-func parseSecondarySlice(expr ast.Expr) ([]GSIInfo, error) {
+func parseSecondarySlice(expr ast.Expr, tableExpr ast.Expr, files []*ast.File) ([]GSIInfo, error) {
 	lit, ok := expr.(*ast.CompositeLit)
 	if !ok {
 		return nil, fmt.Errorf("expected composite literal for Secondary slice")
 	}
 
+	// Pre-resolve all GSI definitions from the table variable
+	gsiDefs := resolveTableGSIDefs(tableExpr, files)
+
 	var gsis []GSIInfo
 	for i, elt := range lit.Elts {
-		gsi, err := parseSecondaryIndex(i, elt)
+		gsi, err := parseSecondaryIndex(i, elt, gsiDefs)
 		if err != nil {
 			return nil, fmt.Errorf("GSI[%d]: %w", i, err)
 		}
@@ -268,7 +274,8 @@ func parseSecondarySlice(expr ast.Expr) ([]GSIInfo, error) {
 }
 
 // parseSecondaryIndex parses a SecondaryIndex composite literal.
-func parseSecondaryIndex(idx int, expr ast.Expr) (GSIInfo, error) {
+// The new SecondaryIndex struct has: GSI table.GSIDefinition, Partition val.ValDef, Sort *val.ValDef
+func parseSecondaryIndex(idx int, expr ast.Expr, gsiDefs []resolvedGSIDef) (GSIInfo, error) {
 	gsi := GSIInfo{Index: idx}
 
 	lit, ok := expr.(*ast.CompositeLit)
@@ -288,57 +295,178 @@ func parseSecondaryIndex(idx int, expr ast.Expr) (GSIInfo, error) {
 		}
 
 		switch key.Name {
-		case "Name":
-			gsi.Name = extractStringLiteral(kv.Value)
+		case "GSI":
+			// Resolve the GSI definition.
+			// Handles: TableVar.GSIs[N] or table.GSIDefinition{Name: "...", ...}
+			name, pkDef, skDef := resolveGSIField(kv.Value, gsiDefs)
+			gsi.Name = name
+			gsi.PKDef = pkDef
+			gsi.SKDef = skDef
 		case "Partition":
-			def, pattern := parseKeyValDef(kv.Value)
-			gsi.PKDef = def
-			gsi.PKPattern = pattern
+			// Now a val.ValDef (val.Fmt("...")) not KeyValDef
+			gsi.PKPattern = extractFmtPattern(kv.Value)
 		case "Sort":
-			// Sort is *KeyValDef, might be address-of
-			def, pattern := parseKeyValDef(kv.Value)
-			gsi.SKDef = def
-			gsi.SKPattern = pattern
+			// Now a *val.ValDef (val.Fmt("...").Ptr()) not *KeyValDef
+			gsi.SKPattern = extractFmtPattern(kv.Value)
 		}
 	}
 
 	return gsi, nil
 }
 
-// parseKeyValDef parses a KeyValDef composite literal, returning (defName, pattern).
-func parseKeyValDef(expr ast.Expr) (string, string) {
-	// Handle address-of operator
-	if unary, ok := expr.(*ast.UnaryExpr); ok && unary.Op == token.AND {
-		expr = unary.X
+// resolvedGSIDef holds a pre-resolved GSI definition from a table variable.
+type resolvedGSIDef struct {
+	Name  string
+	PKDef string
+	SKDef string
+}
+
+// resolveTableGSIDefs extracts GSI definitions from a table variable's composite literal.
+func resolveTableGSIDefs(tableExpr ast.Expr, files []*ast.File) []resolvedGSIDef {
+	if tableExpr == nil || files == nil {
+		return nil
 	}
 
+	// tableExpr should be an identifier like "UserTable"
+	ident, ok := tableExpr.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	tableName := ident.Name
+
+	// Find the table variable declaration in the package
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) == 0 || vs.Names[0].Name != tableName {
+					continue
+				}
+				if len(vs.Values) == 0 {
+					continue
+				}
+				return extractGSIDefsFromTableLiteral(vs.Values[0])
+			}
+		}
+	}
+	return nil
+}
+
+// extractGSIDefsFromTableLiteral parses a TableDefinition composite literal's GSIs field.
+func extractGSIDefsFromTableLiteral(expr ast.Expr) []resolvedGSIDef {
 	lit, ok := expr.(*ast.CompositeLit)
 	if !ok {
-		return "", ""
+		return nil
 	}
-
-	var defName, pattern string
 
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
 			continue
 		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok || key.Name != "GSIs" {
+			continue
+		}
+		// Parse the []GSIDefinition slice
+		sliceLit, ok := kv.Value.(*ast.CompositeLit)
+		if !ok {
+			return nil
+		}
+		var defs []resolvedGSIDef
+		for _, gsiElt := range sliceLit.Elts {
+			def := parseGSIDefinitionLiteral(gsiElt)
+			defs = append(defs, def)
+		}
+		return defs
+	}
+	return nil
+}
 
+// parseGSIDefinitionLiteral parses a table.GSIDefinition composite literal.
+func parseGSIDefinitionLiteral(expr ast.Expr) resolvedGSIDef {
+	var def resolvedGSIDef
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return def
+	}
+
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
 		key, ok := kv.Key.(*ast.Ident)
 		if !ok {
 			continue
 		}
-
 		switch key.Name {
-		case "KeyDef":
-			defName = parseKeyDefName(kv.Value)
-		case "ValDef":
-			pattern = extractFmtPattern(kv.Value)
+		case "Name":
+			def.Name = extractStringLiteral(kv.Value)
+		case "KeyDefinitions":
+			def.PKDef, def.SKDef = parsePrimaryKeyDefFields(kv.Value)
 		}
 	}
+	return def
+}
 
-	return defName, pattern
+// parsePrimaryKeyDefFields extracts PartitionKey.Name and SortKey.Name from a PrimaryKeyDefinition literal.
+func parsePrimaryKeyDefFields(expr ast.Expr) (pkName, skName string) {
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		switch key.Name {
+		case "PartitionKey":
+			pkName = parseKeyDefName(kv.Value)
+		case "SortKey":
+			skName = parseKeyDefName(kv.Value)
+		}
+	}
+	return
+}
+
+// resolveGSIField resolves a GSI field expression to its name and key def names.
+// Handles: TableVar.GSIs[N] (resolved via gsiDefs) or table.GSIDefinition{...} literal.
+func resolveGSIField(expr ast.Expr, gsiDefs []resolvedGSIDef) (name, pkDef, skDef string) {
+	// Case 1: Inline composite literal table.GSIDefinition{Name: "...", ...}
+	if lit, ok := expr.(*ast.CompositeLit); ok {
+		def := parseGSIDefinitionLiteral(lit)
+		return def.Name, def.PKDef, def.SKDef
+	}
+
+	// Case 2: TableVar.GSIs[N] — an index expression
+	indexExpr, ok := expr.(*ast.IndexExpr)
+	if !ok {
+		return
+	}
+
+	// Extract the index N
+	indexLit, ok := indexExpr.Index.(*ast.BasicLit)
+	if !ok || indexLit.Kind != token.INT {
+		return
+	}
+	idx := 0
+	fmt.Sscanf(indexLit.Value, "%d", &idx)
+
+	if idx >= 0 && idx < len(gsiDefs) {
+		d := gsiDefs[idx]
+		return d.Name, d.PKDef, d.SKDef
+	}
+	return
 }
 
 // parseKeyDefName extracts the Name field from a table.KeyDef composite literal.

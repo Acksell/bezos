@@ -3,7 +3,6 @@ package ddbsdk
 import (
 	"context"
 
-	"github.com/acksell/bezos/dynamodb/table"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
@@ -36,7 +35,7 @@ type Writer interface {
 }
 
 type Reader interface {
-	NewQuery(table.TableDefinition, KeyCondition, ...QueryOption) Querier
+	NewQuery(QueryBuilder) *Querier
 	NewLookup(...GetOption) Getter
 }
 
@@ -51,11 +50,6 @@ type Batcher interface {
 	AddAction(...BatchAction)
 	Exec(context.Context) (ExecResult, error)
 	ExecAndRetry(context.Context) error
-}
-
-type Querier interface {
-	Next(context.Context) (*QueryResult, error)
-	QueryAll(context.Context) (*QueryResult, error)
 }
 
 // ConsistentReads are enabled by default.

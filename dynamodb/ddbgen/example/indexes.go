@@ -7,6 +7,8 @@
 package example
 
 import (
+	"fmt"
+
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
@@ -20,7 +22,7 @@ var UserTable = table.TableDefinition{
 	},
 	GSIs: []table.GSIDefinition{
 		{
-			Name: "ByEmail",
+			Name: "GSI1",
 			KeyDefinitions: table.PrimaryKeyDefinition{
 				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
 				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
@@ -35,15 +37,9 @@ var userIndex = index.PrimaryIndex[User]{
 	SortKey:      val.Fmt("PROFILE").Ptr(),
 	Secondary: []index.SecondaryIndex{
 		{
-			Name: "ByEmail",
-			Partition: index.KeyValDef{
-				KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-				ValDef: val.Fmt("EMAIL#{email}"),
-			},
-			Sort: &index.KeyValDef{
-				KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-				ValDef: val.Fmt("USER#{id}"),
-			},
+			GSI:       UserTable.GSIs[0],
+			Partition: val.Fmt("EMAIL#{email}"),
+			Sort:      val.Fmt("USER#{id}").Ptr(),
 		},
 	},
 }
@@ -60,4 +56,45 @@ var orderIndex = index.PrimaryIndex[Order]{
 	Table:        OrderTable,
 	PartitionKey: val.Fmt("TENANT#{tenantID}"),
 	SortKey:      val.Fmt("ORDER#{orderID}").Ptr(),
+}
+
+var SingleTable = table.TableDefinition{
+	Name: "single-table",
+	KeyDefinitions: table.PrimaryKeyDefinition{
+		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+	},
+	GSIs: []table.GSIDefinition{
+		{
+			Name: "GSI1",
+			KeyDefinitions: table.PrimaryKeyDefinition{
+				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+			},
+		},
+	},
+}
+
+type RandomEntity struct {
+	ID string `dynamodbav:"id"`
+}
+
+func (e RandomEntity) IsValid() error {
+	if e.ID == "" {
+		return fmt.Errorf("ID cannot be empty")
+	}
+	return nil
+}
+
+// TODO support index.PrimaryIndex[User] on SingleTable - i.e. support an entity on different tables, useful for table migrations.
+var randomIndex1 = index.PrimaryIndex[RandomEntity]{
+	Table:        SingleTable,
+	PartitionKey: val.Fmt("HAHA"),
+	Secondary: []index.SecondaryIndex{
+		{
+			GSI:       SingleTable.GSIs[0],
+			Partition: val.Fmt("LOL"),
+			Sort:      val.Fmt("SAME#{id}").Ptr(),
+		},
+	},
 }

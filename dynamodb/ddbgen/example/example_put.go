@@ -49,14 +49,23 @@ func main() {
 		panic(fmt.Sprintf("failed to commit transaction: %v", err))
 	}
 
-	// query
-	db.NewQuery(UserIndex.Table, ddbsdk.NewKeyCondition(
-		UserIndex.ByEmailKey("admin@example.com", user.UserID),
-		ddbsdk.Equals("admin@example.com")))
+	// query - using generated GSI builder
+	_ = db.NewQuery(
+		UserIndexGSI1.QueryPartition("admin@example.com").IdEquals(user.UserID),
+	).Descending().PageSize(20)
+
+	// query - using primary index builder
+	_ = db.NewQuery(
+		OrderIndex.QueryPartition("tenant-123").OrderIDBeginsWith("2024"),
+	).Descending()
 
 	batch := db.NewBatch()
 	batch.AddAction(
 		UserIndex.UnsafePut(user),
 		UserIndex.UnsafePut(user),
 		UserIndex.Delete(user.UserID))
+
+	_, _ = db.NewQuery(
+		RandomEntityIndex.QueryPartition(),
+	).Descending().Next(ctx)
 }

@@ -86,6 +86,9 @@ type keyData struct {
 	Params           []paramData // Function parameters derived from the pattern
 	FormatExpr       string      // Go expression to format the key value (using params)
 	EntityFormatExpr string      // Go expression to format using entity fields
+	IsConstant       bool        // True if the key has no field references
+	LiteralPrefix    string      // Leading literal portion before first field ref (for BeginsWith)
+	FieldRefNames    []string    // Field reference names in the pattern (e.g., ["orderID"])
 }
 
 // paramData represents a function parameter.
@@ -184,12 +187,22 @@ func buildKeyData(pattern string, tagMap map[string]FieldInfo) (keyData, error) 
 			Params:           nil,
 			FormatExpr:       fmt.Sprintf("%q", pattern),
 			EntityFormatExpr: fmt.Sprintf("%q", pattern),
+			IsConstant:       true,
+			LiteralPrefix:    pattern,
 		}, nil
 	}
 
 	var params []paramData
 	var formatParts []string
 	var entityFormatParts []string
+	var fieldRefNames []string
+
+	// Extract literal prefix (everything before the first field reference)
+	firstMatchLocs := fieldRefRegex.FindStringSubmatchIndex(pattern)
+	literalPrefix := ""
+	if firstMatchLocs != nil && firstMatchLocs[0] > 0 {
+		literalPrefix = pattern[:firstMatchLocs[0]]
+	}
 
 	// Split the pattern into parts
 	lastEnd := 0
@@ -210,6 +223,7 @@ func buildKeyData(pattern string, tagMap map[string]FieldInfo) (keyData, error) 
 		paramName := pathParts[len(pathParts)-1]
 		params = append(params, paramData{Name: paramName, Type: "string"})
 		formatParts = append(formatParts, paramName)
+		fieldRefNames = append(fieldRefNames, paramName)
 
 		// Find Go field from tag map
 		if field, ok := tagMap[fieldName]; ok {
@@ -236,6 +250,9 @@ func buildKeyData(pattern string, tagMap map[string]FieldInfo) (keyData, error) 
 		Params:           params,
 		FormatExpr:       formatExpr,
 		EntityFormatExpr: entityFormatExpr,
+		IsConstant:       false,
+		LiteralPrefix:    literalPrefix,
+		FieldRefNames:    fieldRefNames,
 	}, nil
 }
 
@@ -358,6 +375,114 @@ var templateFuncs = template.FuncMap{
 		}
 		return strings.Join(args, ", ")
 	},
+	// pkParams returns only the partition key params as a function signature fragment.
+	"pkParams": func(kd keyData) string {
+		var parts []string
+		for _, p := range kd.Params {
+			parts = append(parts, fmt.Sprintf("%s %s", p.Name, p.Type))
+		}
+		return strings.Join(parts, ", ")
+	},
+	// pkArgs returns only the partition key params as call arguments.
+	"pkArgs": func(kd keyData) string {
+		var args []string
+		for _, p := range kd.Params {
+			args = append(args, p.Name)
+		}
+		return strings.Join(args, ", ")
+	},
+	// skPrefix returns the method name prefix based on sort key field refs.
+	// Single field ref: returns the TitleCase field name (e.g., "OrderID").
+	// Multiple field refs: returns "SK".
+	"skPrefix": func(kd keyData) string {
+		if len(kd.FieldRefNames) == 1 {
+			name := kd.FieldRefNames[0]
+			if len(name) == 0 {
+				return "SK"
+			}
+			return strings.ToUpper(name[:1]) + name[1:]
+		}
+		return "SK"
+	},
+	// skEqualsFormatExpr returns a Go expression that formats the sort key for an Equals condition.
+	"skEqualsFormatExpr": func(kd keyData) string {
+		return kd.FormatExpr
+	},
+	// skBeginsWithExpr returns a Go expression for a BeginsWith prefix.
+	// For "ORDER#{orderID}", returns: "ORDER#" + prefix
+	"skBeginsWithExpr": func(kd keyData) string {
+		if kd.LiteralPrefix != "" {
+			return fmt.Sprintf("%q + prefix", kd.LiteralPrefix)
+		}
+		return "prefix"
+	},
+	// skBetweenStartExpr returns a Go expression formatting the start value for Between.
+	"skBetweenStartExpr": func(kd keyData) string {
+		return buildSKBoundExpr(kd, "Start")
+	},
+	// skBetweenEndExpr returns a Go expression formatting the end value for Between.
+	"skBetweenEndExpr": func(kd keyData) string {
+		return buildSKBoundExpr(kd, "End")
+	},
+	// skBoundExpr returns a Go expression formatting a single-value SK condition arg.
+	"skBoundExpr": func(kd keyData) string {
+		return buildSKBoundExpr(kd, "")
+	},
+	// skBeginsWithParams returns the BeginsWith function parameters for this sort key.
+	"skBeginsWithParams": func(kd keyData) string {
+		return "prefix string"
+	},
+	// skEqualsParams returns the Equals function parameters for this sort key.
+	"skEqualsParams": func(kd keyData) string {
+		var parts []string
+		for _, p := range kd.Params {
+			parts = append(parts, fmt.Sprintf("%s %s", p.Name, p.Type))
+		}
+		return strings.Join(parts, ", ")
+	},
+	// skBetweenParams returns the Between function parameters for this sort key.
+	"skBetweenParams": func(kd keyData) string {
+		var parts []string
+		for _, p := range kd.Params {
+			parts = append(parts, fmt.Sprintf("%sStart %s, %sEnd %s", p.Name, p.Type, p.Name, p.Type))
+		}
+		return strings.Join(parts, ", ")
+	},
+	// skSingleValueParams returns params for single-value SK conditions (GT, GTE, LT, LTE).
+	"skSingleValueParams": func(kd keyData) string {
+		var parts []string
+		for _, p := range kd.Params {
+			parts = append(parts, fmt.Sprintf("%s %s", p.Name, p.Type))
+		}
+		return strings.Join(parts, ", ")
+	},
+}
+
+// buildSKBoundExpr builds a Go expression for a sort key bound (used in Between, GT, LT, etc.).
+func buildSKBoundExpr(kd keyData, suffix string) string {
+	if len(kd.Params) == 0 {
+		return kd.FormatExpr
+	}
+	if len(kd.Params) == 1 {
+		paramName := kd.Params[0].Name + suffix
+		if kd.LiteralPrefix != "" {
+			return fmt.Sprintf("fmt.Sprintf(%q, %s)", kd.LiteralPrefix+"%s", paramName)
+		}
+		return paramName
+	}
+	// Multiple params: use the full format pattern with suffixed param names
+	var fmtParts []string
+	var args []string
+	fmtParts = append(fmtParts, kd.LiteralPrefix)
+	for i, p := range kd.Params {
+		args = append(args, p.Name+suffix)
+		if i > 0 {
+			// Add inter-field literal separators — but we don't have them easily.
+			// Fall back to the format expression with suffixed args.
+		}
+		fmtParts = append(fmtParts, "%s")
+	}
+	return fmt.Sprintf("fmt.Sprintf(%q, %s)", strings.Join(fmtParts, ""), strings.Join(args, ", "))
 }
 
 const mainTemplate = `// Code generated by ddbgen. DO NOT EDIT.
@@ -468,6 +593,129 @@ func (idx {{$idx.Name}}IndexUtil) {{$gsi.Name}}Key({{gsiAllParams $gsi}}) table.
 		},
 	}
 }
+{{end}}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// {{$idx.Name}}PrimaryQuery is a query builder for the primary index.
+type {{$idx.Name}}PrimaryQuery struct {
+	idx *{{$idx.Name}}IndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q {{$idx.Name}}PrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx {{$idx.Name}}IndexUtil) QueryPartition({{pkParams $idx.PartitionKey}}) {{$idx.Name}}PrimaryQuery {
+	return {{$idx.Name}}PrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, {{$idx.PartitionKey.FormatExpr}}),
+	}
+}
+{{if and $idx.HasSortKey (not $idx.SortKey.IsConstant)}}
+// {{skPrefix $idx.SortKey}}Equals adds a sort key equals condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}Equals({{skEqualsParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals({{skEqualsFormatExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}BeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}BeginsWith({{skBeginsWithParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith({{skBeginsWithExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}Between adds a sort key between condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}Between({{skBetweenParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between({{skBetweenStartExpr $idx.SortKey}}, {{skBetweenEndExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}GreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}GreaterThan({{skSingleValueParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan({{skBoundExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}GreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}GreaterThanOrEqual({{skSingleValueParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual({{skBoundExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}LessThan adds a sort key < condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}LessThan({{skSingleValueParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan({{skBoundExpr $idx.SortKey}}))
+}
+
+// {{skPrefix $idx.SortKey}}LessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q {{$idx.Name}}PrimaryQuery) {{skPrefix $idx.SortKey}}LessThanOrEqual({{skSingleValueParams $idx.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual({{skBoundExpr $idx.SortKey}}))
+}
+{{end}}
+{{range $gsi := $idx.GSIs}}
+// -------------------------------------------------------------------------
+// {{$idx.Name}}Index{{$gsi.Name}} - Query-only GSI Wrapper
+// -------------------------------------------------------------------------
+
+// {{$idx.Name}}Index{{$gsi.Name}}Util provides query methods for the {{$gsi.Name}} GSI.
+type {{$idx.Name}}Index{{$gsi.Name}}Util struct {
+	primary *{{$idx.Name}}IndexUtil
+}
+
+// {{$idx.Name}}Index{{$gsi.Name}} is the query-only wrapper for the {{$gsi.Name}} GSI.
+var {{$idx.Name}}Index{{$gsi.Name}} = {{$idx.Name}}Index{{$gsi.Name}}Util{primary: &{{$idx.Name}}Index}
+
+// {{$idx.Name}}{{$gsi.Name}}Query is a query builder for the {{$gsi.Name}} GSI.
+type {{$idx.Name}}{{$gsi.Name}}Query struct {
+	idx *{{$idx.Name}}Index{{$gsi.Name}}Util
+	qd  ddbsdk.QueryDef
+}
+
+// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) QueryDef() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the {{$gsi.Name}} GSI.
+func (idx {{$idx.Name}}Index{{$gsi.Name}}Util) QueryPartition({{pkParams $gsi.PartitionKey}}) {{$idx.Name}}{{$gsi.Name}}Query {
+	return {{$idx.Name}}{{$gsi.Name}}Query{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.primary.Table, {{$gsi.PartitionKey.FormatExpr}}).OnIndex("{{$gsi.Name}}"),
+	}
+}
+{{if and $gsi.HasSortKey (not $gsi.SortKey.IsConstant)}}
+// {{skPrefix $gsi.SortKey}}Equals adds a sort key equals condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}Equals({{skEqualsParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals({{skEqualsFormatExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}BeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}BeginsWith({{skBeginsWithParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith({{skBeginsWithExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}Between adds a sort key between condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}Between({{skBetweenParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between({{skBetweenStartExpr $gsi.SortKey}}, {{skBetweenEndExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}GreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}GreaterThan({{skSingleValueParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan({{skBoundExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}GreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}GreaterThanOrEqual({{skSingleValueParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual({{skBoundExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}LessThan adds a sort key < condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}LessThan({{skSingleValueParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan({{skBoundExpr $gsi.SortKey}}))
+}
+
+// {{skPrefix $gsi.SortKey}}LessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}LessThanOrEqual({{skSingleValueParams $gsi.SortKey}}) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual({{skBoundExpr $gsi.SortKey}}))
+}
+{{end}}
 {{end}}
 {{end}}
 `

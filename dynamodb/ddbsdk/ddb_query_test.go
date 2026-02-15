@@ -44,8 +44,8 @@ func TestQuery_NoSortKeyCondition(t *testing.T) {
 	}
 
 	// Query all items with pk="user#1"
-	kc := NewKeyCondition("user#1", nil)
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "user#1")
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -77,8 +77,8 @@ func TestQuery_WithEquals(t *testing.T) {
 	}
 
 	// Query with sort key equals
-	kc := NewKeyCondition("user#1", Equals("profile#2"))
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "user#1").WithSKCondition(Equals("profile#2"))
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -120,8 +120,8 @@ func TestQuery_WithBeginsWith(t *testing.T) {
 	}
 
 	// Query with sort key begins with "profile#"
-	kc := NewKeyCondition("user#1", BeginsWith("profile#"))
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "user#1").WithSKCondition(BeginsWith("profile#"))
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -154,8 +154,8 @@ func TestQuery_WithBetween(t *testing.T) {
 	}
 
 	// Query with Between
-	kc := NewKeyCondition("user#1", Between("2024-01-10", "2024-01-31"))
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "user#1").WithSKCondition(Between("2024-01-10", "2024-01-31"))
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -187,8 +187,8 @@ func TestQuery_WithGreaterThan(t *testing.T) {
 	}
 
 	// Query with GreaterThan
-	kc := NewKeyCondition("scores", GreaterThan("150"))
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "scores").WithSKCondition(GreaterThan("150"))
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -220,8 +220,8 @@ func TestQuery_WithLessThan(t *testing.T) {
 	}
 
 	// Query with LessThan
-	kc := NewKeyCondition("scores", LessThan("250"))
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "scores").WithSKCondition(LessThan("250"))
+	querier := db.NewQuery(qb)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -252,8 +252,8 @@ func TestQuery_Pagination(t *testing.T) {
 	}
 
 	// Query with pagination
-	kc := NewKeyCondition("user#1", nil)
-	querier := db.NewQuery(queryTestTable, kc)
+	qb := QueryPartition(queryTestTable, "user#1")
+	querier := db.NewQuery(qb)
 
 	// Get first page
 	result1, err := querier.Next(ctx)
@@ -300,9 +300,9 @@ func TestQuery_WithFilterExpression(t *testing.T) {
 	}
 
 	// Query with filter for age > 28
-	kc := NewKeyCondition("user#1", nil)
+	qb := QueryPartition(queryTestTable, "user#1")
 	filter := expression.GreaterThan(expression.Name("age"), expression.Value(28))
-	querier := db.NewQuery(queryTestTable, kc).WithFilter(filter)
+	querier := db.NewQuery(qb).Filter(filter)
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -334,8 +334,8 @@ func TestQuery_WithProjection(t *testing.T) {
 	}
 
 	// Query with projection - only get name field
-	kc := NewKeyCondition("user#1", nil)
-	querier := db.NewQuery(queryTestTable, kc, WithProjection("pk", "sk", "name"))
+	qb := QueryPartition(queryTestTable, "user#1")
+	querier := db.NewQuery(qb).Projection("pk", "sk", "name")
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {
@@ -380,8 +380,8 @@ func TestQuery_Descending(t *testing.T) {
 	}
 
 	// Query in descending order
-	kc := NewKeyCondition("user#1", nil)
-	querier := db.NewQuery(queryTestTable, kc, WithDescending())
+	qb := QueryPartition(queryTestTable, "user#1")
+	querier := db.NewQuery(qb).Descending()
 
 	result, err := querier.QueryAll(ctx)
 	if err != nil {

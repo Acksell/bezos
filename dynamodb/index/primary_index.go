@@ -44,7 +44,7 @@ func (pi *PrimaryIndex[E]) Validate() error {
 
 	for _, gsi := range pi.Secondary {
 		if err := gsi.Validate(); err != nil {
-			return fmt.Errorf("GSI %q: %w", gsi.Name, err)
+			return fmt.Errorf("GSI %q: %w", gsi.Name(), err)
 		}
 	}
 

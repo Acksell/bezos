@@ -1,9 +1,5 @@
 package ddbsdk
 
-import (
-	"github.com/acksell/bezos/dynamodb/table"
-)
-
 func New(awsddb AWSDynamoClientV2) IO {
 	return &Client{
 		awsddb: awsddb,
@@ -26,11 +22,13 @@ func (c *Client) NewBatch(opts ...BatchOption) Batcher {
 	return NewBatcher(c.awsddb, opts...)
 }
 
-// NewQuery creates a new querier for partition-based queries.
+// NewQuery creates a new querier.
 //
-// Options: [WithEventuallyConsistentReads], [WithDescending], [WithPageSize], [WithGSI], [WithProjection], [WithFilter]
-func (c *Client) NewQuery(table table.TableDefinition, kc KeyCondition, opts ...QueryOption) Querier {
-	return NewQuerier(c.awsddb, table, kc, opts...)
+// Configure with method chaining: Descending(), PageSize(n), Projection(...), Filter(...), EventuallyConsistent().
+//
+// See [QueryBuilder] for how to build queries.
+func (c *Client) NewQuery(qb QueryBuilder) *Querier {
+	return NewQuerier(c.awsddb, qb)
 }
 
 // NewLookup creates a new getter for direct lookups by primary key.

@@ -90,26 +90,28 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 		{
 			name: "valid GSI",
 			gsi: SecondaryIndex{
-				Name: "ByEmail",
-				Partition: KeyValDef{
-					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-					ValDef: val.Fmt("EMAIL#{email}"),
+				GSI: table.GSIDefinition{
+					Name: "ByEmail",
+					KeyDefinitions: table.PrimaryKeyDefinition{
+						PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+					},
 				},
+				Partition: val.Fmt("EMAIL#{email}"),
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid GSI with sort key",
 			gsi: SecondaryIndex{
-				Name: "ByEmail",
-				Partition: KeyValDef{
-					KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-					ValDef: val.Fmt("EMAIL#{email}"),
+				GSI: table.GSIDefinition{
+					Name: "ByEmail",
+					KeyDefinitions: table.PrimaryKeyDefinition{
+						PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+						SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+					},
 				},
-				Sort: &KeyValDef{
-					KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
-					ValDef: val.Fmt("USER#{id}"),
-				},
+				Partition: val.Fmt("EMAIL#{email}"),
+				Sort:      val.Fmt("USER#{id}").Ptr(),
 			},
 			wantErr: false,
 		},
@@ -121,10 +123,10 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 		{
 			name: "missing partition key def name",
 			gsi: SecondaryIndex{
-				Name: "ByEmail",
-				Partition: KeyValDef{
-					ValDef: val.Fmt("EMAIL#{email}"),
+				GSI: table.GSIDefinition{
+					Name: "ByEmail",
 				},
+				Partition: val.Fmt("EMAIL#{email}"),
 			},
 			wantErr: true,
 		},
@@ -142,15 +144,15 @@ func TestSecondaryIndex_Validate(t *testing.T) {
 
 func TestSecondaryIndex_KeyDefinition(t *testing.T) {
 	gsi := SecondaryIndex{
-		Name: "ByEmail",
-		Partition: KeyValDef{
-			KeyDef: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
-			ValDef: val.Fmt("EMAIL#{email}"),
+		GSI: table.GSIDefinition{
+			Name: "ByEmail",
+			KeyDefinitions: table.PrimaryKeyDefinition{
+				PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindN},
+			},
 		},
-		Sort: &KeyValDef{
-			KeyDef: table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindN},
-			ValDef: val.FromField("timestamp"),
-		},
+		Partition: val.Fmt("EMAIL#{email}"),
+		Sort:      val.FromField("timestamp").Ptr(),
 	}
 
 	keyDef := gsi.KeyDefinition()

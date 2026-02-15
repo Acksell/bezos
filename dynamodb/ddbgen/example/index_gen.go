@@ -76,8 +76,8 @@ func (idx UserIndexUtil) UnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(id))
 }
 
-// ByEmailKey creates a key for querying the ByEmail GSI.
-func (idx UserIndexUtil) ByEmailKey(email string, id string) table.PrimaryKey {
+// GSI1Key creates a key for querying the GSI1 GSI.
+func (idx UserIndexUtil) GSI1Key(email string, id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
@@ -85,6 +85,91 @@ func (idx UserIndexUtil) ByEmailKey(email string, id string) table.PrimaryKey {
 			SortKey:      fmt.Sprintf("USER#%s", id),
 		},
 	}
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// UserPrimaryQuery is a query builder for the primary index.
+type UserPrimaryQuery struct {
+	idx *UserIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q UserPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx UserIndexUtil) QueryPartition(id string) UserPrimaryQuery {
+	return UserPrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, fmt.Sprintf("USER#%s", id)),
+	}
+}
+
+// -------------------------------------------------------------------------
+// UserIndexGSI1 - Query-only GSI Wrapper
+// -------------------------------------------------------------------------
+
+// UserIndexGSI1Util provides query methods for the GSI1 GSI.
+type UserIndexGSI1Util struct {
+	primary *UserIndexUtil
+}
+
+// UserIndexGSI1 is the query-only wrapper for the GSI1 GSI.
+var UserIndexGSI1 = UserIndexGSI1Util{primary: &UserIndex}
+
+// UserGSI1Query is a query builder for the GSI1 GSI.
+type UserGSI1Query struct {
+	idx *UserIndexGSI1Util
+	qd  ddbsdk.QueryDef
+}
+
+// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
+func (q UserGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the GSI1 GSI.
+func (idx UserIndexGSI1Util) QueryPartition(email string) UserGSI1Query {
+	return UserGSI1Query{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.primary.Table, fmt.Sprintf("EMAIL#%s", email)).OnIndex("GSI1"),
+	}
+}
+
+// IdEquals adds a sort key equals condition and returns the final QueryDef.
+func (q UserGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("USER#%s", id)))
+}
+
+// IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q UserGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("USER#" + prefix))
+}
+
+// IdBetween adds a sort key between condition and returns the final QueryDef.
+func (q UserGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("USER#%s", idStart), fmt.Sprintf("USER#%s", idEnd)))
+}
+
+// IdGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q UserGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("USER#%s", id)))
+}
+
+// IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q UserGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("USER#%s", id)))
+}
+
+// IdLessThan adds a sort key < condition and returns the final QueryDef.
+func (q UserGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("USER#%s", id)))
+}
+
+// IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("USER#%s", id)))
 }
 
 // =============================================================================
@@ -134,4 +219,216 @@ func (idx OrderIndexUtil) Delete(tenantID string, orderID string) *ddbsdk.Delete
 // UnsafeUpdate creates an Update operation without optimistic locking.
 func (idx OrderIndexUtil) UnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(tenantID, orderID))
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// OrderPrimaryQuery is a query builder for the primary index.
+type OrderPrimaryQuery struct {
+	idx *OrderIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q OrderPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx OrderIndexUtil) QueryPartition(tenantID string) OrderPrimaryQuery {
+	return OrderPrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, fmt.Sprintf("TENANT#%s", tenantID)),
+	}
+}
+
+// OrderIDEquals adds a sort key equals condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDEquals(orderID string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("ORDER#%s", orderID)))
+}
+
+// OrderIDBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("ORDER#" + prefix))
+}
+
+// OrderIDBetween adds a sort key between condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDBetween(orderIDStart string, orderIDEnd string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("ORDER#%s", orderIDStart), fmt.Sprintf("ORDER#%s", orderIDEnd)))
+}
+
+// OrderIDGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDGreaterThan(orderID string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("ORDER#%s", orderID)))
+}
+
+// OrderIDGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDGreaterThanOrEqual(orderID string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("ORDER#%s", orderID)))
+}
+
+// OrderIDLessThan adds a sort key < condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDLessThan(orderID string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("ORDER#%s", orderID)))
+}
+
+// OrderIDLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q OrderPrimaryQuery) OrderIDLessThanOrEqual(orderID string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("ORDER#%s", orderID)))
+}
+
+// =============================================================================
+// RandomEntity Index Wrapper
+// =============================================================================
+
+// RandomEntityIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type RandomEntityIndexUtil struct {
+	*index.PrimaryIndex[RandomEntity]
+}
+
+// RandomEntityIndex is the typed wrapper for RandomEntity operations.
+var RandomEntityIndex = RandomEntityIndexUtil{PrimaryIndex: &randomIndex1}
+
+// PrimaryKey creates a primary key from explicit parameters.
+func (idx RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "HAHA",
+		},
+	}
+}
+
+// PrimaryKeyFrom creates the primary key from a RandomEntity entity.
+func (idx RandomEntityIndexUtil) PrimaryKeyFrom(e *RandomEntity) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "HAHA",
+		},
+	}
+}
+
+// GSIKeysFrom creates all GSI keys from a RandomEntity entity.
+func (idx RandomEntityIndexUtil) GSIKeysFrom(e *RandomEntity) []table.PrimaryKey {
+	return []table.PrimaryKey{
+		{
+			Definition: idx.Secondary[0].KeyDefinition(),
+			Values: table.PrimaryKeyValues{
+				PartitionKey: "LOL",
+				SortKey:      fmt.Sprintf("SAME#%s", e.ID),
+			},
+		},
+	}
+}
+
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx RandomEntityIndexUtil) UnsafePut(e *RandomEntity) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+}
+
+// Delete creates a Delete operation.
+func (idx RandomEntityIndexUtil) Delete() *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey())
+}
+
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx RandomEntityIndexUtil) UnsafeUpdate() *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey())
+}
+
+// GSI1Key creates a key for querying the GSI1 GSI.
+func (idx RandomEntityIndexUtil) GSI1Key(id string) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Secondary[0].KeyDefinition(),
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "LOL",
+			SortKey:      fmt.Sprintf("SAME#%s", id),
+		},
+	}
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// RandomEntityPrimaryQuery is a query builder for the primary index.
+type RandomEntityPrimaryQuery struct {
+	idx *RandomEntityIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q RandomEntityPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx RandomEntityIndexUtil) QueryPartition() RandomEntityPrimaryQuery {
+	return RandomEntityPrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, "HAHA"),
+	}
+}
+
+// -------------------------------------------------------------------------
+// RandomEntityIndexGSI1 - Query-only GSI Wrapper
+// -------------------------------------------------------------------------
+
+// RandomEntityIndexGSI1Util provides query methods for the GSI1 GSI.
+type RandomEntityIndexGSI1Util struct {
+	primary *RandomEntityIndexUtil
+}
+
+// RandomEntityIndexGSI1 is the query-only wrapper for the GSI1 GSI.
+var RandomEntityIndexGSI1 = RandomEntityIndexGSI1Util{primary: &RandomEntityIndex}
+
+// RandomEntityGSI1Query is a query builder for the GSI1 GSI.
+type RandomEntityGSI1Query struct {
+	idx *RandomEntityIndexGSI1Util
+	qd  ddbsdk.QueryDef
+}
+
+// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
+func (q RandomEntityGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the GSI1 GSI.
+func (idx RandomEntityIndexGSI1Util) QueryPartition() RandomEntityGSI1Query {
+	return RandomEntityGSI1Query{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.primary.Table, "LOL").OnIndex("GSI1"),
+	}
+}
+
+// IdEquals adds a sort key equals condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("SAME#%s", id)))
+}
+
+// IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("SAME#" + prefix))
+}
+
+// IdBetween adds a sort key between condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("SAME#%s", idStart), fmt.Sprintf("SAME#%s", idEnd)))
+}
+
+// IdGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("SAME#%s", id)))
+}
+
+// IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("SAME#%s", id)))
+}
+
+// IdLessThan adds a sort key < condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("SAME#%s", id)))
+}
+
+// IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q RandomEntityGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("SAME#%s", id)))
 }

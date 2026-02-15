@@ -11,132 +11,168 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-type querier struct {
+// DynamoKeyValue constrains the types that can be used as DynamoDB key values.
+// This prevents passing structs or other invalid types as partition keys.
+type DynamoKeyValue interface {
+	~string | ~int | ~int64 | ~float64 | ~[]byte
+}
+
+// QueryDef itself is a QueryBuilder, so you can:
+// #1 Pass a QueryDef{} struct literal directly.
+//
+//	db.NewQuery(ddbsdk.QueryDef{
+//	   Table:    usersTable,
+//	   Partition: "USER#Ninja123",
+//	   SortKey:  ddbsdk.BeginsWith("PROFILE#"),
+//	}).Descending().PageSize(20)
+//
+// #2 Use [QueryPartition] and chain [QueryDef.OnIndex] and [QueryDef.WithSKCondition]:
+//
+//	// Create a QueryDef for partition key "USER#Ninja123"
+//	q := QueryPartition(usersTable, "USER#Ninja123").
+//		OnIndex("GSI1").
+//		WithSKCondition(BeginsWith("PROFILE#"))
+//	db.NewQuery(q).Descending().PageSize(20)
+//
+// #3 Use an external library that builds queries.
+//
+// For example, using code generated from ddbgen:
+//
+//	q := UserIndex.QueryPartition("Ninja123").ProfileBeginsWith("")
+//	db.NewQuery(q).Descending().PageSize(20)
+type QueryBuilder interface {
+	Build() QueryDef
+}
+
+// QueryDef defines a query against a DynamoDB table or GSI.
+// It holds the table, optional index name, partition key value, and optional sort key condition.
+//
+// Use [QueryPartition] to create a QueryDef, then optionally chain [QueryDef.OnIndex]
+// and [QueryDef.WithSKCondition] to configure the query.
+//
+// Typically, generated code wraps these calls to provide type-safe, format-aware query methods.
+//
+// Fields are exported to allow struct literal initialization as an escape hatch.
+type QueryDef struct {
+	Table     table.TableDefinition
+	IndexName *string
+	Partition any
+	SortKey   SortKeyCondition
+}
+
+// Build returns itself, implementing [QueryBuilder].
+func (qd QueryDef) Build() QueryDef { return qd }
+
+// QueryPartition creates a QueryDef for a partition key query on the given table.
+// The partition value is constrained to valid DynamoDB key types.
+func QueryPartition[P DynamoKeyValue](t table.TableDefinition, partition P) QueryDef {
+	return QueryDef{
+		Table:     t,
+		Partition: partition,
+	}
+}
+
+// OnIndex sets the GSI name to query. Returns a new QueryDef.
+func (qd QueryDef) OnIndex(name string) QueryDef {
+	qd.IndexName = &name
+	return qd
+}
+
+// WithSKCondition sets the sort key condition for the query. Returns a new QueryDef.
+func (qd QueryDef) WithSKCondition(sk SortKeyCondition) QueryDef {
+	qd.SortKey = sk
+	return qd
+}
+
+// Querier executes DynamoDB queries with configurable options.
+// Create with [Client.NewQuery] or [NewQuerier], then configure with method chaining.
+type Querier struct {
 	awsddb AWSDynamoClientV2
 
-	table   table.TableDefinition
-	keyCond KeyCondition
+	queryDef QueryDef
 
 	//internal, not exposed to user
 	lastCursor map[string]types.AttributeValue
 
-	opts queryOptions
-}
-
-var _ Querier = &querier{}
-
-type queryOptions struct {
-	// default to consistent reads
-	// because if you don't know what you're doing you may introduce race conditions.
+	// Options set via method chaining
 	eventuallyConsistent bool
 	pageSize             int32
 	descending           bool
-	indexName            *string
 	filter               expression2.ConditionBuilder
 	projectionAttributes []string
 }
 
 const defaultPageSize = 10
 
-// QueryOption configures the querier behavior.
-type QueryOption func(*queryOptions)
+// NewQuerier creates a Querier from a QueryBuilder.
+func NewQuerier(ddb AWSDynamoClientV2, qb QueryBuilder) *Querier {
+	return &Querier{
+		awsddb:   ddb,
+		queryDef: qb.Build(),
+		pageSize: defaultPageSize,
+	}
+}
 
-// WithEventuallyConsistentReads enables eventually consistent reads.
+// EventuallyConsistent enables eventually consistent reads.
 // By default, reads are strongly consistent.
-func WithEventuallyConsistentReads() QueryOption {
-	return func(o *queryOptions) {
-		o.eventuallyConsistent = true
-	}
-}
-
-// WithDescending returns results in descending sort key order.
-// By default, results are returned in ascending order.
-func WithDescending() QueryOption {
-	return func(o *queryOptions) {
-		o.descending = true
-	}
-}
-
-// WithPageSize sets the maximum number of items to return per page.
-// Default is 10.
-func WithPageSize(limit int) QueryOption {
-	return func(o *queryOptions) {
-		o.pageSize = int32(limit)
-	}
-}
-
-// WithGSI queries a Global Secondary Index instead of the main table.
-func WithGSI(indexName string) QueryOption {
-	return func(o *queryOptions) {
-		o.indexName = &indexName
-	}
-}
-
-// WithProjection limits the attributes returned in the response.
-// Only the specified attributes will be retrieved from DynamoDB.
-func WithProjection(attrs ...string) QueryOption {
-	return func(o *queryOptions) {
-		o.projectionAttributes = attrs
-	}
-}
-
-// WithFilter applies a filter expression to the query results.
-// Filter expressions are applied after the query but before results are returned.
-// Note: filtered items still consume read capacity.
-func WithFilter(filter expression2.ConditionBuilder) QueryOption {
-	return func(o *queryOptions) {
-		o.filter = filter
-	}
-}
-
-type KeyCondition struct {
-	partition any
-	strategy  SortKeyStrategy
-}
-
-func NewKeyCondition(partition any, strategy SortKeyStrategy) KeyCondition {
-	return KeyCondition{
-		partition: partition,
-		strategy:  strategy,
-	}
-}
-
-// todo make first two arguments here part of the dynamodb client interface. ddb Clients should be able to return a Querier and a Getter.
-func NewQuerier(ddb AWSDynamoClientV2, table table.TableDefinition, kc KeyCondition, opts ...QueryOption) *querier {
-	q := &querier{
-		awsddb:  ddb,
-		table:   table,
-		keyCond: kc,
-		opts: queryOptions{
-			pageSize: defaultPageSize,
-		},
-	}
-	for _, opt := range opts {
-		opt(&q.opts)
-	}
+func (q *Querier) EventuallyConsistent() *Querier {
+	q.eventuallyConsistent = true
 	return q
 }
 
+// Descending returns results in descending sort key order.
+// By default, results are returned in ascending order.
+func (q *Querier) Descending() *Querier {
+	q.descending = true
+	return q
+}
+
+// PageSize sets the maximum number of items to return per page.
+// Default is 10.
+func (q *Querier) PageSize(limit int) *Querier {
+	q.pageSize = int32(limit)
+	return q
+}
+
+// Projection limits the attributes returned in the response.
+// Only the specified attributes will be retrieved from DynamoDB.
+func (q *Querier) Projection(attrs ...string) *Querier {
+	q.projectionAttributes = attrs
+	return q
+}
+
+// Filter applies a filter expression to the query results.
+// Filter expressions are applied after the query but before results are returned.
+// Note: filtered items still consume read capacity.
+func (q *Querier) Filter(filter expression2.ConditionBuilder) *Querier {
+	q.filter = filter
+	return q
+}
+
+// QueryResult holds the results of a query page.
 type QueryResult struct {
 	Items  []Item
 	IsDone bool
 }
 
-func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
+func (q *Querier) Next(ctx context.Context) (*QueryResult, error) {
 	b := expression2.NewBuilder()
-	key := expression2.KeyEqual(expression2.Key(q.table.KeyDefinitions.PartitionKey.Name), expression2.Value(q.keyCond.partition))
-	if q.keyCond.strategy != nil {
-		key = key.And(q.keyCond.strategy(q.table.KeyDefinitions.SortKey.Name))
+
+	pkName := q.queryDef.Table.KeyDefinitions.PartitionKey.Name
+	key := expression2.KeyEqual(expression2.Key(pkName), expression2.Value(q.queryDef.Partition))
+	if q.queryDef.SortKey != nil {
+		skName := q.queryDef.Table.KeyDefinitions.SortKey.Name
+		key = key.And(q.queryDef.SortKey(skName))
 	}
 	b = b.WithKeyCondition(key)
 
-	if q.opts.filter.IsSet() {
-		b = b.WithFilter(q.opts.filter)
+	if q.filter.IsSet() {
+		b = b.WithFilter(q.filter)
 	}
 
-	if len(q.opts.projectionAttributes) > 0 {
+	if len(q.projectionAttributes) > 0 {
 		var proj expression2.ProjectionBuilder
-		for i, attr := range q.opts.projectionAttributes {
+		for i, attr := range q.projectionAttributes {
 			if i == 0 {
 				proj = expression2.NamesList(expression2.Name(attr))
 			} else {
@@ -152,16 +188,16 @@ func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
 	}
 
 	res, err := q.awsddb.Query(ctx, &dynamodbv2.QueryInput{
-		TableName:                 &q.table.Name,
-		IndexName:                 q.opts.indexName,
+		TableName:                 &q.queryDef.Table.Name,
+		IndexName:                 q.queryDef.IndexName,
 		KeyConditionExpression:    expr.KeyCondition(),
 		FilterExpression:          expr.Filter(),
 		ProjectionExpression:      expr.Projection(),
 		ExpressionAttributeValues: expr.Values(),
 		ExpressionAttributeNames:  expr.Names(),
-		ConsistentRead:            ptr(!q.opts.eventuallyConsistent),
-		Limit:                     ptr(q.opts.pageSize),
-		ScanIndexForward:          ptr(!q.opts.descending),
+		ConsistentRead:            ptr(!q.eventuallyConsistent),
+		Limit:                     ptr(q.pageSize),
+		ScanIndexForward:          ptr(!q.descending),
 		ExclusiveStartKey:         q.lastCursor,
 	})
 	if err != nil {
@@ -175,7 +211,7 @@ func (q *querier) Next(ctx context.Context) (*QueryResult, error) {
 	}, nil
 }
 
-func (q *querier) QueryAll(ctx context.Context) (*QueryResult, error) {
+func (q *Querier) QueryAll(ctx context.Context) (*QueryResult, error) {
 	var allItems []Item
 	for {
 		res, err := q.Next(ctx)
