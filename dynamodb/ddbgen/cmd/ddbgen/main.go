@@ -1,10 +1,14 @@
 // ddbgen is a code generator for type-safe DynamoDB key constructors.
 //
-// Usage:
+// # Installation
 //
-//	//go:generate go run github.com/acksell/bezos/dynamodb/ddbgen/cmd/ddbgen
+//	go install github.com/acksell/bezos/dynamodb/ddbgen/cmd/ddbgen@latest
 //
-// Define indexes using PrimaryIndex with an entity type parameter:
+// # Usage
+//
+// Add a go:generate directive to your package that contains the index definitions.
+//
+//	//go:generate ddbgen
 //
 //	var userIndex = index.PrimaryIndex[User]{
 //	    Table:        UserTable,
