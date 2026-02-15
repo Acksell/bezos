@@ -24,7 +24,7 @@ func batchTestKey(pk, sk string) table.PrimaryKey {
 }
 
 func TestBatcher_PutItems(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create batch
@@ -71,7 +71,7 @@ func TestBatcher_PutItems(t *testing.T) {
 }
 
 func TestBatcher_DeleteItems(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create test items first
@@ -134,7 +134,7 @@ func TestBatcher_DeleteItems(t *testing.T) {
 }
 
 func TestBatcher_MixedPutAndDelete(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create some existing items
@@ -220,7 +220,7 @@ func TestBatcher_MixedPutAndDelete(t *testing.T) {
 }
 
 func TestBatcher_DuplicateKey_Fails(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	batch := db.NewBatch()
@@ -228,7 +228,7 @@ func TestBatcher_DuplicateKey_Fails(t *testing.T) {
 	// Add same item twice
 	item := testEntity{PK: "user#1", SK: "profile#1", Name: "Alice"}
 	pk := batchTestKey(item.PK, item.SK)
-	
+
 	batch.AddAction(NewUnsafePut(batchTestTable, pk, &item))
 	batch.AddAction(NewUnsafePut(batchTestTable, pk, &item))
 
@@ -246,7 +246,7 @@ func TestBatcher_DuplicateKey_Fails(t *testing.T) {
 }
 
 func TestBatcher_EmptyBatch(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	batch := db.NewBatch()
@@ -263,7 +263,7 @@ func TestBatcher_EmptyBatch(t *testing.T) {
 }
 
 func TestBatcher_GetItemsBatch(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -317,7 +317,7 @@ func TestBatcher_GetItemsBatch(t *testing.T) {
 }
 
 func TestBatcher_GetItemsBatch_SomeNotFound(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create only one item
@@ -348,7 +348,7 @@ func TestBatcher_GetItemsBatch_SomeNotFound(t *testing.T) {
 }
 
 func TestBatcher_GetItemsBatch_WithProjection(t *testing.T) {
-	db := NewMock(batchTestTable)
+	db := NewMemoryClient(batchTestTable)
 	ctx := context.Background()
 
 	// Create test items

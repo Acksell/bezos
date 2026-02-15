@@ -10,7 +10,7 @@ import (
 )
 
 func TestClient_PutItem_Basic(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	entity := &testEntity{
@@ -53,7 +53,7 @@ func TestClient_PutItem_Basic(t *testing.T) {
 }
 
 func TestClient_PutItem_WithTTL(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	entity := &testEntity{
@@ -89,7 +89,7 @@ func TestClient_PutItem_WithTTL(t *testing.T) {
 }
 
 func TestClient_PutItem_WithCondition(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	entity := &testEntity{
@@ -117,7 +117,7 @@ func TestClient_PutItem_WithCondition(t *testing.T) {
 }
 
 func TestClient_SafePut_OptimisticLocking(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	entity := &testEntity{

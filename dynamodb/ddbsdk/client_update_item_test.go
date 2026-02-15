@@ -10,7 +10,7 @@ import (
 )
 
 func TestClient_UpdateItem_Basic(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -57,7 +57,7 @@ func TestClient_UpdateItem_Basic(t *testing.T) {
 }
 
 func TestClient_UpdateItem_WithCondition(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -105,7 +105,7 @@ func TestClient_UpdateItem_WithCondition(t *testing.T) {
 }
 
 func TestClient_UpdateItem_RefreshTTL(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// Create an item

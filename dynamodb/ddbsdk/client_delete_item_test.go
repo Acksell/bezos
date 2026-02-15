@@ -8,7 +8,7 @@ import (
 )
 
 func TestClient_DeleteItem_Basic(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// First create an item
@@ -55,7 +55,7 @@ func TestClient_DeleteItem_Basic(t *testing.T) {
 }
 
 func TestClient_DeleteItem_WithCondition(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -104,7 +104,7 @@ func TestClient_DeleteItem_WithCondition(t *testing.T) {
 }
 
 func TestClient_DeleteItem_ConditionFails(t *testing.T) {
-	db := NewMock(clientTestTable)
+	db := NewMemoryClient(clientTestTable)
 	ctx := context.Background()
 
 	// Create an item

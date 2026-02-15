@@ -1,9 +1,30 @@
 package ddbsdk
 
-func New(awsddb AWSDynamoClientV2) IO {
+import (
+	"github.com/acksell/bezos/dynamodb/ddbstore"
+	"github.com/acksell/bezos/dynamodb/table"
+)
+
+func NewClient(awsddb AWSDynamoClientV2) *Client {
 	return &Client{
 		awsddb: awsddb,
 	}
+}
+
+func NewMemoryClient(defs ...table.TableDefinition) *Client {
+	mock, err := ddbstore.New(ddbstore.StoreOptions{InMemory: true}, defs...)
+	if err != nil {
+		panic(err)
+	}
+	return NewClient(mock)
+}
+
+func NewDiskClient(path string, defs ...table.TableDefinition) *Client {
+	local, err := ddbstore.New(ddbstore.StoreOptions{Path: path}, defs...)
+	if err != nil {
+		panic(err)
+	}
+	return NewClient(local)
 }
 
 type Client struct {

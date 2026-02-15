@@ -25,7 +25,7 @@ func txTestKey(pk, sk string) table.PrimaryKey {
 }
 
 func TestTransaction_SinglePut(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	tx := db.NewTx()
@@ -60,7 +60,7 @@ func TestTransaction_SinglePut(t *testing.T) {
 }
 
 func TestTransaction_MultiplePuts(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	tx := db.NewTx()
@@ -99,7 +99,7 @@ func TestTransaction_MultiplePuts(t *testing.T) {
 }
 
 func TestTransaction_PutAndDelete(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create an existing item
@@ -157,7 +157,7 @@ func TestTransaction_PutAndDelete(t *testing.T) {
 }
 
 func TestTransaction_Update(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create an existing item
@@ -199,7 +199,7 @@ func TestTransaction_Update(t *testing.T) {
 }
 
 func TestTransaction_WithConditions(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create an existing item
@@ -211,7 +211,7 @@ func TestTransaction_WithConditions(t *testing.T) {
 
 	// Transaction with condition
 	tx := db.NewTx()
-	
+
 	cond := expression.Equal(expression.Name("active"), expression.Value(true))
 	update := NewUnsafeUpdate(txTestTable, pk).
 		AddOp(SetFieldOp("name", "Alice Updated")).
@@ -243,7 +243,7 @@ func TestTransaction_WithConditions(t *testing.T) {
 }
 
 func TestTransaction_ConditionFails(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create an existing item
@@ -255,7 +255,7 @@ func TestTransaction_ConditionFails(t *testing.T) {
 
 	// Transaction with failing condition
 	tx := db.NewTx()
-	
+
 	cond := expression.Equal(expression.Name("active"), expression.Value(true))
 	update := NewUnsafeUpdate(txTestTable, pk).
 		AddOp(SetFieldOp("name", "Alice Updated")).
@@ -289,7 +289,7 @@ func TestTransaction_ConditionFails(t *testing.T) {
 }
 
 func TestTransaction_DuplicateAction_Fails(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	tx := db.NewTx()
@@ -300,7 +300,7 @@ func TestTransaction_DuplicateAction_Fails(t *testing.T) {
 	// Add same action twice
 	put1 := NewUnsafePut(txTestTable, pk, entity)
 	put2 := NewUnsafePut(txTestTable, pk, entity)
-	
+
 	tx.AddAction(put1)
 	tx.AddAction(put2)
 
@@ -312,7 +312,7 @@ func TestTransaction_DuplicateAction_Fails(t *testing.T) {
 }
 
 func TestTransaction_EmptyTransaction(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	tx := db.NewTx()
@@ -324,16 +324,16 @@ func TestTransaction_EmptyTransaction(t *testing.T) {
 }
 
 func TestTransaction_MixedOperations(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Setup: create some existing items
 	existing1 := &testEntity{PK: "user#1", SK: "profile", Name: "Alice", Age: 30}
 	existing2 := &testEntity{PK: "user#2", SK: "profile", Name: "Bob", Age: 25}
-	
+
 	pk1 := txTestKey(existing1.PK, existing1.SK)
 	pk2 := txTestKey(existing2.PK, existing2.SK)
-	
+
 	if err := db.PutItem(ctx, NewUnsafePut(txTestTable, pk1, existing1)); err != nil {
 		t.Fatalf("Initial put failed: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestTransaction_MixedOperations(t *testing.T) {
 }
 
 func TestTransaction_GetItemsTx(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -458,7 +458,7 @@ func TestTransaction_GetItemsTx(t *testing.T) {
 }
 
 func TestTransaction_GetItemsTx_WithProjection(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -510,7 +510,7 @@ func TestTransaction_GetItemsTx_WithProjection(t *testing.T) {
 }
 
 func TestTransaction_GetItemsTx_TooManyItems(t *testing.T) {
-	db := NewMock(txTestTable)
+	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()
 
 	// Try to get more than 100 items

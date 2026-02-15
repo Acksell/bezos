@@ -24,7 +24,7 @@ func getterTestKey(pk, sk string) table.PrimaryKey {
 }
 
 func TestGetter_GetItem_Found(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -67,18 +67,18 @@ func TestGetter_GetItem_Found(t *testing.T) {
 }
 
 func TestGetter_GetItem_NotFound(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Try to get non-existent item
 	getter := db.NewLookup()
 	pk := getterTestKey("user#999", "profile")
-	
+
 	item, err := getter.GetItem(ctx, GetItemRequest{
 		Table: getterTestTable,
 		Key:   pk,
 	})
-	
+
 	// ddbstore returns an error for not found, but item should be nil
 	// This is the actual behavior from the in-memory mock
 	if err != nil {
@@ -91,14 +91,14 @@ func TestGetter_GetItem_NotFound(t *testing.T) {
 		}
 		return
 	}
-	
+
 	if item != nil {
 		t.Error("expected item to be nil")
 	}
 }
 
 func TestGetter_GetItem_WithProjection(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -144,7 +144,7 @@ func TestGetter_GetItem_WithProjection(t *testing.T) {
 }
 
 func TestGetter_GetItem_ConsistentRead(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -176,7 +176,7 @@ func TestGetter_GetItem_ConsistentRead(t *testing.T) {
 }
 
 func TestGetter_GetItem_EventuallyConsistent(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create an item
@@ -208,7 +208,7 @@ func TestGetter_GetItem_EventuallyConsistent(t *testing.T) {
 }
 
 func TestGetter_GetItemsBatch_AllFound(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create multiple items
@@ -261,7 +261,7 @@ func TestGetter_GetItemsBatch_AllFound(t *testing.T) {
 }
 
 func TestGetter_GetItemsBatch_PartiallyFound(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create only some items
@@ -298,11 +298,11 @@ func TestGetter_GetItemsBatch_PartiallyFound(t *testing.T) {
 }
 
 func TestGetter_GetItemsBatch_Empty(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	getter := db.NewLookup()
-	
+
 	results, err := getter.GetItemsBatch(ctx)
 	if err != nil {
 		t.Fatalf("GetItemsBatch failed: %v", err)
@@ -314,7 +314,7 @@ func TestGetter_GetItemsBatch_Empty(t *testing.T) {
 }
 
 func TestGetter_GetItemsTx_AllFound(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create multiple items
@@ -351,11 +351,11 @@ func TestGetter_GetItemsTx_AllFound(t *testing.T) {
 }
 
 func TestGetter_GetItemsTx_Empty(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	getter := db.NewLookup()
-	
+
 	results, err := getter.GetItemsTx(ctx)
 	if err != nil {
 		t.Fatalf("GetItemsTx failed: %v", err)
@@ -367,7 +367,7 @@ func TestGetter_GetItemsTx_Empty(t *testing.T) {
 }
 
 func TestGetter_GetItemsTx_ExceedsLimit(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Try to get more than 100 items (DynamoDB limit)
@@ -387,7 +387,7 @@ func TestGetter_GetItemsTx_ExceedsLimit(t *testing.T) {
 }
 
 func TestGetter_GetItemsBatch_WithDifferentProjections(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -432,7 +432,7 @@ func TestGetter_GetItemsBatch_WithDifferentProjections(t *testing.T) {
 }
 
 func TestGetter_GetItemsTx_WithDifferentProjections(t *testing.T) {
-	db := NewMock(getterTestTable)
+	db := NewMemoryClient(getterTestTable)
 	ctx := context.Background()
 
 	// Create test items

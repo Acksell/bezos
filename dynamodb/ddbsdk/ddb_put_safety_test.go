@@ -36,7 +36,7 @@ func testPrimaryKey(pk, sk string) table.PrimaryKey {
 }
 
 func TestSafePut_NewItem_Succeeds(t *testing.T) {
-	db := NewMock(testTable)
+	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
@@ -50,7 +50,7 @@ func TestSafePut_NewItem_Succeeds(t *testing.T) {
 }
 
 func TestSafePut_SameVersion_Fails(t *testing.T) {
-	db := NewMock(testTable)
+	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
@@ -71,7 +71,7 @@ func TestSafePut_SameVersion_Fails(t *testing.T) {
 }
 
 func TestSafePut_LowerVersion_Fails(t *testing.T) {
-	db := NewMock(testTable)
+	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 2}
@@ -93,7 +93,7 @@ func TestSafePut_LowerVersion_Fails(t *testing.T) {
 }
 
 func TestSafePut_HigherVersion_Succeeds(t *testing.T) {
-	db := NewMock(testTable)
+	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}

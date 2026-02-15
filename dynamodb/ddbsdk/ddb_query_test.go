@@ -24,7 +24,7 @@ func queryTestKey(pk, sk string) table.PrimaryKey {
 }
 
 func TestQuery_NoSortKeyCondition(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items with same partition key
@@ -58,7 +58,7 @@ func TestQuery_NoSortKeyCondition(t *testing.T) {
 }
 
 func TestQuery_WithEquals(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -100,7 +100,7 @@ func TestQuery_WithEquals(t *testing.T) {
 }
 
 func TestQuery_WithBeginsWith(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -134,7 +134,7 @@ func TestQuery_WithBeginsWith(t *testing.T) {
 }
 
 func TestQuery_WithBetween(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -168,7 +168,7 @@ func TestQuery_WithBetween(t *testing.T) {
 }
 
 func TestQuery_WithGreaterThan(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items with numeric sort keys
@@ -201,7 +201,7 @@ func TestQuery_WithGreaterThan(t *testing.T) {
 }
 
 func TestQuery_WithLessThan(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -234,7 +234,7 @@ func TestQuery_WithLessThan(t *testing.T) {
 }
 
 func TestQuery_Pagination(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -281,7 +281,7 @@ func TestQuery_Pagination(t *testing.T) {
 // This test is skipped for now
 /*
 func TestQuery_WithFilterExpression(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -316,7 +316,7 @@ func TestQuery_WithFilterExpression(t *testing.T) {
 */
 
 func TestQuery_WithProjection(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
@@ -361,7 +361,7 @@ func TestQuery_WithProjection(t *testing.T) {
 }
 
 func TestQuery_Descending(t *testing.T) {
-	db := NewMock(queryTestTable)
+	db := NewMemoryClient(queryTestTable)
 	ctx := context.Background()
 
 	// Create test items
