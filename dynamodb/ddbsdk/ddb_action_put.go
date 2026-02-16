@@ -56,7 +56,15 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	if err != nil {
 		return expression2.Expression{}, nil, fmt.Errorf("failed to marshal entity to dynamodb map: %w", err)
 	}
-
+	// Add primary keys to the entity map
+	for k, v := range p.PrimaryKey().DDB() {
+		if val, exists := entity[k]; exists {
+			if val != v {
+				return expression2.Expression{}, nil, fmt.Errorf("primary key attribute %q already exists in entity with a different value, got %v vs %v", k, val, v)
+			}
+		}
+		entity[k] = v
+	}
 	if p.ttlExpiry != nil {
 		entity[p.Table.TimeToLiveKey] = ttlDDB(*p.ttlExpiry)
 	}

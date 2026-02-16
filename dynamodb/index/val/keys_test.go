@@ -182,8 +182,7 @@ func TestConstantConstructors(t *testing.T) {
 	})
 
 	t.Run("Bytes", func(t *testing.T) {
-		data := []byte{1, 2, 3}
-		v := val.Bytes(data)
+		v := val.Bytes("dGVzdA==")
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}

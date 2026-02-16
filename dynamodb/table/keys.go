@@ -36,7 +36,6 @@ type PrimaryKey struct {
 	Values     PrimaryKeyValues
 }
 
-// TODO test
 func (k PrimaryKey) DDB() map[string]types.AttributeValue {
 	pk, err := attributevalue.Marshal(k.Values.PartitionKey)
 	if err != nil {
@@ -44,16 +43,24 @@ func (k PrimaryKey) DDB() map[string]types.AttributeValue {
 	}
 	err = attributeMatchesDefinition(k.Definition.PartitionKey.Kind, pk)
 	if err != nil {
-		panic(fmt.Errorf("key kind does not match dynamo value: %w", err))
+		panic(fmt.Errorf("partition key kind does not match dynamo value: %w", err))
 	}
-
+	if k.Definition.SortKey.Name == "" {
+		return map[string]types.AttributeValue{
+			k.Definition.PartitionKey.Name: pk,
+		}
+	}
+	if k.Values.SortKey == nil {
+		// todo return errors instead
+		panic(fmt.Errorf("sort key %q is required but got nil", k.Definition.SortKey.Name))
+	}
 	sk, err := attributevalue.Marshal(k.Values.SortKey)
 	if err != nil {
 		panic(fmt.Errorf("failed to marshal sort key of type %T with value %v: %w", k.Values.SortKey, k.Values.SortKey, err))
 	}
 	err = attributeMatchesDefinition(k.Definition.SortKey.Kind, sk)
 	if err != nil {
-		panic(fmt.Errorf("key kind does not match dynamo value: %w", err))
+		panic(fmt.Errorf("sort key %q kind does not match dynamo value: %w", k.Definition.SortKey.Name, err))
 	}
 
 	return map[string]types.AttributeValue{

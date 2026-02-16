@@ -294,7 +294,8 @@ func (idx RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: "HAHA",
+			PartitionKey: "world",
+			SortKey:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f},
 		},
 	}
 }
@@ -304,7 +305,8 @@ func (idx RandomEntityIndexUtil) PrimaryKeyFrom(e *RandomEntity) table.PrimaryKe
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: "HAHA",
+			PartitionKey: "world",
+			SortKey:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f},
 		},
 	}
 }
@@ -365,7 +367,7 @@ func (q RandomEntityPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 func (idx RandomEntityIndexUtil) QueryPartition() RandomEntityPrimaryQuery {
 	return RandomEntityPrimaryQuery{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "HAHA"),
+		qd:  ddbsdk.QueryPartition(idx.Table, "world"),
 	}
 }
 

@@ -31,10 +31,10 @@ func (t TableDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) 
 func (k PrimaryKeyDefinition) ExtractPrimaryKey(doc map[string]types.AttributeValue) (PrimaryKey, error) {
 	part, ok := doc[k.PartitionKey.Name]
 	if !ok {
-		return PrimaryKey{}, fmt.Errorf("partition key not found")
+		return PrimaryKey{}, fmt.Errorf("partition key %q not found", k.PartitionKey.Name)
 	}
 	if err := attributeMatchesDefinition(k.PartitionKey.Kind, part); err != nil {
-		return PrimaryKey{}, fmt.Errorf("partition key kind does not match definition")
+		return PrimaryKey{}, fmt.Errorf("document key %q kind does not match definition: %w", k.PartitionKey.Name, err)
 	}
 	pk := PrimaryKey{
 		Definition: k,
@@ -47,10 +47,10 @@ func (k PrimaryKeyDefinition) ExtractPrimaryKey(doc map[string]types.AttributeVa
 	}
 	sort, ok := doc[k.SortKey.Name]
 	if !ok {
-		return PrimaryKey{}, fmt.Errorf("sort key not found")
+		return PrimaryKey{}, fmt.Errorf("sort key %q not found on document", k.SortKey.Name)
 	}
 	if err := attributeMatchesDefinition(k.SortKey.Kind, sort); err != nil {
-		return PrimaryKey{}, fmt.Errorf("sort key kind does not match definition")
+		return PrimaryKey{}, fmt.Errorf("sort key %q kind does not match definition: %w", k.SortKey.Name, err)
 	}
 	pk.Values.SortKey = keyValueFromAV(sort)
 	return pk, nil

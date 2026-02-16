@@ -2,6 +2,7 @@ package ddbgen
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"go/format"
 	"regexp"
@@ -127,7 +128,7 @@ func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
 		IsVersioned:  idx.IsVersioned,
 	}
 
-	if idx.SortKey != "" {
+	if idx.SortKey.Pattern != "" {
 		skData, err := buildKeyData(idx.SortKey, tagMap)
 		if err != nil {
 			return indexData{}, fmt.Errorf("sort key: %w", err)
@@ -161,7 +162,7 @@ func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo) (gsiData, error) {
 		PartitionKey: pkData,
 	}
 
-	if gsi.SKPattern != "" {
+	if gsi.SKPattern.Pattern != "" {
 		skData, err := buildKeyData(gsi.SKPattern, tagMap)
 		if err != nil {
 			return gsiData{}, fmt.Errorf("sort key: %w", err)
@@ -176,17 +177,29 @@ func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo) (gsiData, error) {
 // fieldRefRegex matches {fieldName} or {nested.field.path} patterns
 var fieldRefRegex = regexp.MustCompile(`\{([^}]+)\}`)
 
-// buildKeyData converts a pattern string to keyData for the template.
-func buildKeyData(pattern string, tagMap map[string]FieldInfo) (keyData, error) {
+// buildKeyData converts a key pattern to keyData for the template.
+func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo) (keyData, error) {
+	pattern := kp.Pattern
 	// Find all field references
 	matches := fieldRefRegex.FindAllStringSubmatch(pattern, -1)
 
 	if len(matches) == 0 {
 		// Constant pattern - no parameters
+		formatExpr := fmt.Sprintf("%q", pattern)
+		
+		// For bytes, decode base64 and generate a byte slice literal
+		if kp.Kind == KeyKindBytes {
+			decoded, err := base64.StdEncoding.DecodeString(pattern)
+			if err != nil {
+				return keyData{}, fmt.Errorf("invalid base64 for bytes key: %w", err)
+			}
+			formatExpr = formatByteLiteral(decoded)
+		}
+		
 		return keyData{
 			Params:           nil,
-			FormatExpr:       fmt.Sprintf("%q", pattern),
-			EntityFormatExpr: fmt.Sprintf("%q", pattern),
+			FormatExpr:       formatExpr,
+			EntityFormatExpr: formatExpr,
 			IsConstant:       true,
 			LiteralPrefix:    pattern,
 		}, nil
@@ -254,6 +267,18 @@ func buildKeyData(pattern string, tagMap map[string]FieldInfo) (keyData, error) 
 		LiteralPrefix:    literalPrefix,
 		FieldRefNames:    fieldRefNames,
 	}, nil
+}
+
+// formatByteLiteral generates a Go byte slice literal like []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f}.
+func formatByteLiteral(data []byte) string {
+	if len(data) == 0 {
+		return "[]byte{}"
+	}
+	var parts []string
+	for _, b := range data {
+		parts = append(parts, fmt.Sprintf("0x%02x", b))
+	}
+	return "[]byte{" + strings.Join(parts, ", ") + "}"
 }
 
 // buildFormatExpr builds a Go expression to format a key value.

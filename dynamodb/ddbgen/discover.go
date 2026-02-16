@@ -10,6 +10,21 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// KeyKind indicates the type of key value (string, number, or bytes).
+type KeyKind string
+
+const (
+	KeyKindString KeyKind = "S" // String (val.Fmt, val.String)
+	KeyKindNumber KeyKind = "N" // Number (val.Number)
+	KeyKindBytes  KeyKind = "B" // Binary (val.Bytes - base64 encoded)
+)
+
+// KeyPattern holds a key pattern and its kind.
+type KeyPattern struct {
+	Pattern string
+	Kind    KeyKind
+}
+
 // IndexInfo holds discovered information about a PrimaryIndex variable.
 type IndexInfo struct {
 	// VarName is the variable name (e.g., "userIndex")
@@ -17,9 +32,9 @@ type IndexInfo struct {
 	// EntityType is the Go type name of the entity (e.g., "User")
 	EntityType string
 	// PartitionKey is the partition key pattern (e.g., "USER#{id}")
-	PartitionKey string
+	PartitionKey KeyPattern
 	// SortKey is the sort key pattern, empty if none
-	SortKey string
+	SortKey KeyPattern
 	// GSIs holds information about secondary indexes
 	GSIs []GSIInfo
 	// IsVersioned is true if the entity implements VersionedDynamoEntity
@@ -35,11 +50,11 @@ type GSIInfo struct {
 	// PKDef is the partition key definition name (e.g., "gsi1pk")
 	PKDef string
 	// PKPattern is the partition key pattern
-	PKPattern string
+	PKPattern KeyPattern
 	// SKDef is the sort key definition name, empty if none
 	SKDef string
 	// SKPattern is the sort key pattern, empty if none
-	SKPattern string
+	SKPattern KeyPattern
 }
 
 // FieldInfo holds information about a struct field relevant to key generation.
@@ -228,12 +243,12 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr, files []*ast.F
 		case "Table":
 			tableExpr = kv.Value
 		case "PartitionKey":
-			if str := extractFmtPattern(kv.Value); str != "" {
-				info.PartitionKey = str
+			if kp := extractKeyPattern(kv.Value); kp.Pattern != "" {
+				info.PartitionKey = kp
 			}
 		case "SortKey":
-			if str := extractFmtPattern(kv.Value); str != "" {
-				info.SortKey = str
+			if kp := extractKeyPattern(kv.Value); kp.Pattern != "" {
+				info.SortKey = kp
 			}
 		case "Secondary":
 			gsis, err := parseSecondarySlice(kv.Value, tableExpr, files)
@@ -244,7 +259,7 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr, files []*ast.F
 		}
 	}
 
-	if info.PartitionKey == "" {
+	if info.PartitionKey.Pattern == "" {
 		return info, fmt.Errorf("PartitionKey is required")
 	}
 
@@ -304,10 +319,10 @@ func parseSecondaryIndex(idx int, expr ast.Expr, gsiDefs []resolvedGSIDef) (GSII
 			gsi.SKDef = skDef
 		case "Partition":
 			// Now a val.ValDef (val.Fmt("...")) not KeyValDef
-			gsi.PKPattern = extractFmtPattern(kv.Value)
+			gsi.PKPattern = extractKeyPattern(kv.Value)
 		case "Sort":
 			// Now a *val.ValDef (val.Fmt("...").Ptr()) not *KeyValDef
-			gsi.SKPattern = extractFmtPattern(kv.Value)
+			gsi.SKPattern = extractKeyPattern(kv.Value)
 		}
 	}
 
@@ -515,25 +530,47 @@ func extractStringLiteral(expr ast.Expr) string {
 	return s
 }
 
-// extractFmtPattern extracts a pattern string from val.Fmt("...") or val.Fmt("...").Ptr()
-func extractFmtPattern(expr ast.Expr) string {
-	// Handle val.Fmt("...").Ptr() - a call expression where Fun is a selector
+// extractLiteral extracts the string representation of a basic literal (string, int, or float).
+func extractLiteral(expr ast.Expr) string {
+	// Handle basic literals (string, int, float)
+	if lit, ok := expr.(*ast.BasicLit); ok {
+		switch lit.Kind {
+		case token.STRING:
+			return extractStringLiteral(expr)
+		case token.INT, token.FLOAT:
+			return lit.Value
+		}
+	}
+	return ""
+}
+
+// extractKeyPattern extracts a key pattern from val.Fmt("..."), val.String("..."), val.Number(...), val.Bytes("..."), or .Ptr() variants
+// TODO: Use the existing val package's AST logic instead of parsing text here, to ensure consistency and support all val features.
+func extractKeyPattern(expr ast.Expr) KeyPattern {
+	// Handle .Ptr() - a call expression where Fun is a selector
 	if call, ok := expr.(*ast.CallExpr); ok {
 		if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 			// Check if this is a .Ptr() call
 			if sel.Sel.Name == "Ptr" {
 				// Recursively get pattern from the inner expression
-				return extractFmtPattern(sel.X)
+				return extractKeyPattern(sel.X)
 			}
-			// Check if this is val.Fmt("...") - selector on package name
-			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "val" && sel.Sel.Name == "Fmt" {
+			// Check if this is val.Fmt/String/Number/Bytes("...") - selector on package name
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "val" {
 				if len(call.Args) == 1 {
-					return extractStringLiteral(call.Args[0])
+					switch sel.Sel.Name {
+					case "Fmt", "String":
+						return KeyPattern{Pattern: extractLiteral(call.Args[0]), Kind: KeyKindString}
+					case "Number":
+						return KeyPattern{Pattern: extractLiteral(call.Args[0]), Kind: KeyKindNumber}
+					case "Bytes":
+						return KeyPattern{Pattern: extractLiteral(call.Args[0]), Kind: KeyKindBytes}
+					}
 				}
 			}
 		}
 	}
-	return ""
+	return KeyPattern{}
 }
 
 // extractEntityFields extracts field information from a struct type.

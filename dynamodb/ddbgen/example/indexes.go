@@ -89,7 +89,8 @@ func (e RandomEntity) IsValid() error {
 // TODO support index.PrimaryIndex[User] on SingleTable - i.e. support an entity on different tables, useful for table migrations.
 var randomIndex1 = index.PrimaryIndex[RandomEntity]{
 	Table:        SingleTable,
-	PartitionKey: val.Fmt("HAHA"),
+	PartitionKey: val.Fmt("world"),
+	SortKey:      val.Bytes("SGVsbG8=").Ptr(),
 	Secondary: []index.SecondaryIndex{
 		{
 			GSI:       SingleTable.GSIs[0],

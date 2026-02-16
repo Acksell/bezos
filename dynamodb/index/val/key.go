@@ -1,6 +1,8 @@
 package val
 
 import (
+	"encoding/base64"
+
 	"golang.org/x/exp/constraints"
 )
 
@@ -61,8 +63,13 @@ func Number[T Numeric](v T) ValDef {
 }
 
 // Bytes creates a ValDef with a constant binary value.
-func Bytes(v []byte) ValDef {
-	return ValDef{Const: &ConstValue{kind: SpecKindB, value: v}}
+// The input should be a base64-encoded string.
+func Bytes(b64 string) ValDef {
+	decoded, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		panic("val.Bytes: invalid base64 string: " + err.Error())
+	}
+	return ValDef{Const: &ConstValue{kind: SpecKindB, value: decoded}}
 }
 
 // Kind returns the DynamoDB attribute type for this constant.
