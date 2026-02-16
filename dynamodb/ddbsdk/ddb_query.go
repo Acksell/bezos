@@ -158,10 +158,21 @@ type QueryResult struct {
 func (q *Querier) Next(ctx context.Context) (*QueryResult, error) {
 	b := expression2.NewBuilder()
 
-	pkName := q.queryDef.Table.KeyDefinitions.PartitionKey.Name
+	// Get the appropriate key definitions (GSI or primary table)
+	keyDef := q.queryDef.Table.KeyDefinitions
+	if q.queryDef.IndexName != nil {
+		for _, gsi := range q.queryDef.Table.GSIs {
+			if gsi.Name == *q.queryDef.IndexName {
+				keyDef = gsi.KeyDefinitions
+				break
+			}
+		}
+	}
+
+	pkName := keyDef.PartitionKey.Name
 	key := expression2.KeyEqual(expression2.Key(pkName), expression2.Value(q.queryDef.Partition))
 	if q.queryDef.SortKey != nil {
-		skName := q.queryDef.Table.KeyDefinitions.SortKey.Name
+		skName := keyDef.SortKey.Name
 		key = key.And(q.queryDef.SortKey(skName))
 	}
 	b = b.WithKeyCondition(key)
