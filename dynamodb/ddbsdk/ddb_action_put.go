@@ -59,8 +59,11 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	// Add primary keys to the entity map
 	for k, v := range p.PrimaryKey().DDB() {
 		if val, exists := entity[k]; exists {
-			if val != v {
-				return expression2.Expression{}, nil, fmt.Errorf("primary key attribute %q already exists in entity with a different value, got %v vs %v", k, val, v)
+			if !isAttrEqual(val, v) {
+				return expression2.Expression{}, nil, fmt.Errorf(
+					"primary key attribute %q already exists in entity with a different value, got %#v vs %#v",
+					k, val, v,
+				)
 			}
 		}
 		entity[k] = v
@@ -88,6 +91,29 @@ func (p *Put) Build() (expression2.Expression, map[string]types.AttributeValue, 
 	}
 
 	return exp, entity, nil
+}
+
+func isAttrEqual(a, b types.AttributeValue) bool {
+	switch existing := a.(type) {
+	case *types.AttributeValueMemberS:
+		if incoming, ok := b.(*types.AttributeValueMemberS); ok && existing.Value == incoming.Value {
+			return true
+		}
+	case *types.AttributeValueMemberN:
+		if incoming, ok := b.(*types.AttributeValueMemberN); ok && existing.Value == incoming.Value {
+			return true
+		}
+	case *types.AttributeValueMemberB:
+		if incoming, ok := b.(*types.AttributeValueMemberB); ok && len(existing.Value) == len(incoming.Value) {
+			for i := range existing.Value {
+				if existing.Value[i] != incoming.Value[i] {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // validateGSIKey checks that the GSI key definition matches one of the table's GSI definitions.
