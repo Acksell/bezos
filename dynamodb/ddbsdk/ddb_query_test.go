@@ -402,3 +402,76 @@ func TestQuery_Descending(t *testing.T) {
 		t.Errorf("expected first item to be 'Third', got %q", first.Name)
 	}
 }
+
+func TestQuery_OnGSI(t *testing.T) {
+	// Table with a GSI
+	gsiTable := table.TableDefinition{
+		Name: "gsi-test-table",
+		KeyDefinitions: table.PrimaryKeyDefinition{
+			PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+			SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+		},
+		GSIs: []table.GSIDefinition{
+			{
+				Name: "ByEmail",
+				KeyDefinitions: table.PrimaryKeyDefinition{
+					PartitionKey: table.KeyDef{Name: "gsi1pk", Kind: table.KeyKindS},
+					SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
+				},
+			},
+		},
+	}
+
+	db := NewMemoryClient(gsiTable)
+	ctx := context.Background()
+
+	// Create test items with GSI keys (using testEntity which already implements DynamoEntity)
+	// We'll add GSI key attributes directly to the item map
+	items := []struct {
+		pk, sk, gsi1pk, gsi1sk, name string
+	}{
+		{"user#1", "profile", "email#alice@test.com", "user#1", "Alice"},
+		{"user#2", "profile", "email#bob@test.com", "user#2", "Bob"},
+		{"user#3", "profile", "email#alice@test.com", "user#3", "Alice2"},
+	}
+
+	for _, item := range items {
+		entity := &testEntity{PK: item.pk, SK: item.sk, Name: item.name}
+		pk := table.PrimaryKey{
+			Definition: gsiTable.KeyDefinitions,
+			Values:     table.PrimaryKeyValues{PartitionKey: item.pk, SortKey: item.sk},
+		}
+		gsiKey := table.PrimaryKey{
+			Definition: gsiTable.GSIs[0].KeyDefinitions,
+			Values:     table.PrimaryKeyValues{PartitionKey: item.gsi1pk, SortKey: item.gsi1sk},
+		}
+		put := NewUnsafePut(gsiTable, pk, entity).WithGSIKeys(gsiKey)
+		if err := db.PutItem(ctx, put); err != nil {
+			t.Fatalf("PutItem failed: %v", err)
+		}
+	}
+
+	// Query via the GSI - this should use gsi1pk/gsi1sk, not pk/sk
+	qb := QueryPartition(gsiTable, "email#alice@test.com").OnIndex("ByEmail")
+	querier := db.NewQuery(qb)
+
+	result, err := querier.QueryAll(ctx)
+	if err != nil {
+		t.Fatalf("QueryAll on GSI failed: %v", err)
+	}
+
+	if len(result.Items) != 2 {
+		t.Errorf("expected 2 items from GSI query, got %d", len(result.Items))
+	}
+
+	// Verify the items are the ones with matching gsi1pk
+	for _, item := range result.Items {
+		var retrieved testEntity
+		if err := attributevalue.UnmarshalMap(item, &retrieved); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if retrieved.Name != "Alice" && retrieved.Name != "Alice2" {
+			t.Errorf("expected Name='Alice' or 'Alice2', got %q", retrieved.Name)
+		}
+	}
+}
