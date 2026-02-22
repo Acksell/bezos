@@ -35,14 +35,15 @@ func TestStore_DeleteItem(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, err = store.GetItem(ctx, &dynamodb.GetItemInput{
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
 			TableName: &singleTableDesign.Name,
 			Key: map[string]types.AttributeValue{
 				"pk": &types.AttributeValueMemberS{Value: "test"},
 				"sk": &types.AttributeValueMemberS{Value: "test"},
 			},
 		})
-		require.Error(t, err) // Should not be found
+		require.NoError(t, err)
+		assert.Empty(t, result.Item) // Should not be found
 	})
 
 	t.Run("return old values", func(t *testing.T) {

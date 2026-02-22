@@ -91,14 +91,15 @@ func TestStore_TransactWriteItems(t *testing.T) {
 		require.Error(t, err)
 
 		// Verify first item was NOT created due to rollback
-		_, err = store.GetItem(ctx, &dynamodb.GetItemInput{
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
 			TableName: &singleTableDesign.Name,
 			Key: map[string]types.AttributeValue{
 				"pk": &types.AttributeValueMemberS{Value: "new#1"},
 				"sk": &types.AttributeValueMemberS{Value: "item"},
 			},
 		})
-		require.Error(t, err) // Should not exist
+		require.NoError(t, err)
+		assert.Empty(t, result.Item) // Should not exist
 	})
 
 	t.Run("condition check without write", func(t *testing.T) {
@@ -495,13 +496,14 @@ func TestStore_TransactWriteItems(t *testing.T) {
 		assert.Equal(t, "150", gotUpdate.Item["count"].(*types.AttributeValueMemberN).Value)
 
 		// Verify delete
-		_, err = store.GetItem(ctx, &dynamodb.GetItemInput{
+		deleteResult, err := store.GetItem(ctx, &dynamodb.GetItemInput{
 			TableName: &singleTableDesign.Name,
 			Key: map[string]types.AttributeValue{
 				"pk": &types.AttributeValueMemberS{Value: "tx-mixed-delete"},
 				"sk": &types.AttributeValueMemberS{Value: "item"},
 			},
 		})
-		require.Error(t, err) // Should not exist
+		require.NoError(t, err)
+		assert.Empty(t, deleteResult.Item) // Should not exist
 	})
 }

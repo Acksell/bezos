@@ -15,14 +15,15 @@ func TestStore_GetItem(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("not found", func(t *testing.T) {
-		_, err := store.GetItem(ctx, &dynamodb.GetItemInput{
+		result, err := store.GetItem(ctx, &dynamodb.GetItemInput{
 			TableName: &singleTableDesign.Name,
 			Key: map[string]types.AttributeValue{
 				"pk": &types.AttributeValueMemberS{Value: "nonexistent"},
 				"sk": &types.AttributeValueMemberS{Value: "nonexistent"},
 			},
 		})
-		require.Error(t, err)
+		require.NoError(t, err)
+		assert.Empty(t, result.Item)
 	})
 
 	t.Run("found after put", func(t *testing.T) {

@@ -50,7 +50,7 @@ func (s *Store) GetItem(ctx context.Context, params *dynamodb.GetItemInput, optF
 	})
 
 	if err == errNotFound {
-		return &dynamodb.GetItemOutput{}, errNotFound
+		return &dynamodb.GetItemOutput{}, nil
 	}
 	if err != nil {
 		return nil, err
