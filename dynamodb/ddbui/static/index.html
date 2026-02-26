@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DynamoDB Debug UI</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>DynamoDB UI</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <h2>Tables</h2>
+                    <ul id="table-list" class="table-list">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <div id="welcome-view" class="view active">
+                <div class="welcome">
+                    <h2>Welcome to DynamoDB Debug UI</h2>
+                    <p>Select a table from the sidebar to get started.</p>
+                </div>
+            </div>
+
+            <div id="table-view" class="view">
+                <header class="content-header">
+                    <h2 id="table-name"></h2>
+                    <div class="header-actions">
+                        <button id="btn-refresh" class="btn btn-secondary">Refresh</button>
+                        <button id="btn-new-item" class="btn btn-primary">New Item</button>
+                    </div>
+                </header>
+
+                <div class="tabs">
+                    <button class="tab active" data-tab="data">Data</button>
+                    <button class="tab" data-tab="schema">Schema</button>
+                    <button class="tab" data-tab="query">Query</button>
+                </div>
+
+                <!-- Data Tab -->
+                <div id="tab-data" class="tab-content active">
+                    <div class="toolbar">
+                        <div class="toolbar-group">
+                            <label>
+                                <input type="checkbox" id="scan-mode" checked>
+                                Scan Mode
+                            </label>
+                        </div>
+                        <div class="toolbar-group">
+                            <label>Limit:</label>
+                            <select id="page-limit">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="data-container">
+                        <table class="data-table">
+                            <thead id="data-thead">
+                                <!-- Populated by JS -->
+                            </thead>
+                            <tbody id="data-tbody">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="pagination">
+                        <span id="item-count"></span>
+                        <button id="btn-load-more" class="btn btn-secondary" style="display:none">Load More</button>
+                    </div>
+                </div>
+
+                <!-- Schema Tab -->
+                <div id="tab-schema" class="tab-content">
+                    <div class="schema-container">
+                        <section class="schema-section">
+                            <h3>Table Structure</h3>
+                            <div id="schema-table"></div>
+                        </section>
+                        <section class="schema-section">
+                            <h3>GSIs</h3>
+                            <div id="schema-gsis"></div>
+                        </section>
+                        <section class="schema-section">
+                            <h3>Entities</h3>
+                            <div id="schema-entities"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Query Tab -->
+                <div id="tab-query" class="tab-content">
+                    <div class="query-builder">
+                        <div class="form-group">
+                            <label for="query-index">Index:</label>
+                            <select id="query-index">
+                                <option value="">Primary Index</option>
+                                <!-- GSIs populated by JS -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="query-pk">Partition Key Value:</label>
+                            <input type="text" id="query-pk" placeholder="e.g., USER#123">
+                        </div>
+                        <div class="form-group">
+                            <label for="query-sk-op">Sort Key Condition:</label>
+                            <div class="inline-group">
+                                <select id="query-sk-op">
+                                    <option value="">None</option>
+                                    <option value="=">=</option>
+                                    <option value="begins_with">begins_with</option>
+                                    <option value="<">&lt;</option>
+                                    <option value="<=">&lt;=</option>
+                                    <option value=">">&gt;</option>
+                                    <option value=">=">&gt;=</option>
+                                    <option value="between">between</option>
+                                </select>
+                                <input type="text" id="query-sk-val" placeholder="Sort key value">
+                                <input type="text" id="query-sk-val2" placeholder="End value" style="display:none">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <button id="btn-run-query" class="btn btn-primary">Run Query</button>
+                        </div>
+                    </div>
+                    <div class="query-results">
+                        <h3>Results</h3>
+                        <div id="query-results-container">
+                            <p class="placeholder">Run a query to see results</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Item Modal -->
+    <div id="item-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Item</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="item-editor" rows="20"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-delete-item" class="btn btn-danger">Delete</button>
+                <button id="btn-save-item" class="btn btn-primary">Save</button>
+                <button class="btn btn-secondary modal-close">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

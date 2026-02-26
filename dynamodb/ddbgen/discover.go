@@ -31,6 +31,12 @@ type IndexInfo struct {
 	VarName string
 	// EntityType is the Go type name of the entity (e.g., "User")
 	EntityType string
+	// TableName is the DynamoDB table name (e.g., "users")
+	TableName string
+	// PKDefName is the partition key attribute name (e.g., "pk")
+	PKDefName string
+	// SKDefName is the sort key attribute name (e.g., "sk")
+	SKDefName string
 	// PartitionKey is the partition key pattern (e.g., "USER#{id}")
 	PartitionKey KeyPattern
 	// SortKey is the sort key pattern, empty if none
@@ -242,6 +248,11 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr, files []*ast.F
 		switch key.Name {
 		case "Table":
 			tableExpr = kv.Value
+			// Resolve table definition to get name and key def names
+			tableDef := resolveTableDefinition(tableExpr, files)
+			info.TableName = tableDef.Name
+			info.PKDefName = tableDef.PKDefName
+			info.SKDefName = tableDef.SKDefName
 		case "PartitionKey":
 			if kp := extractKeyPattern(kv.Value); kp.Pattern != "" {
 				info.PartitionKey = kp
@@ -264,6 +275,76 @@ func parseIndexLiteral(varName, entityType string, expr ast.Expr, files []*ast.F
 	}
 
 	return info, nil
+}
+
+// resolvedTableDef holds resolved table definition information.
+type resolvedTableDef struct {
+	Name      string
+	PKDefName string
+	SKDefName string
+}
+
+// resolveTableDefinition extracts table name and key definition names from a table variable.
+func resolveTableDefinition(tableExpr ast.Expr, files []*ast.File) resolvedTableDef {
+	var def resolvedTableDef
+	if tableExpr == nil || files == nil {
+		return def
+	}
+
+	// tableExpr should be an identifier like "UserTable"
+	ident, ok := tableExpr.(*ast.Ident)
+	if !ok {
+		return def
+	}
+	tableName := ident.Name
+
+	// Find the table variable declaration in the package
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Names) == 0 || vs.Names[0].Name != tableName {
+					continue
+				}
+				if len(vs.Values) == 0 {
+					continue
+				}
+				return extractTableDefFromLiteral(vs.Values[0])
+			}
+		}
+	}
+	return def
+}
+
+// extractTableDefFromLiteral parses a TableDefinition composite literal.
+func extractTableDefFromLiteral(expr ast.Expr) resolvedTableDef {
+	var def resolvedTableDef
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return def
+	}
+
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		switch key.Name {
+		case "Name":
+			def.Name = extractStringLiteral(kv.Value)
+		case "KeyDefinitions":
+			def.PKDefName, def.SKDefName = parsePrimaryKeyDefFields(kv.Value)
+		}
+	}
+	return def
 }
 
 // parseSecondarySlice parses a []SecondaryIndex composite literal.
