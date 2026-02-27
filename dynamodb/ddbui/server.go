@@ -24,8 +24,8 @@ type ServerConfig struct {
 	Port int
 	// DBPath is the path to the BadgerDB database. Empty for in-memory mode.
 	DBPath string
-	// SchemaPattern is a glob pattern for schema YAML files.
-	SchemaPattern string
+	// SchemaFiles is the list of schema YAML file paths.
+	SchemaFiles []string
 }
 
 // Server is the debug UI HTTP server.
@@ -39,7 +39,7 @@ type Server struct {
 // NewServer creates a new debug UI server.
 func NewServer(config ServerConfig) (*Server, error) {
 	// Load schemas
-	schema, err := LoadSchemas(config.SchemaPattern)
+	schema, err := LoadSchemas(config.SchemaFiles)
 	if err != nil {
 		return nil, fmt.Errorf("loading schemas: %w", err)
 	}

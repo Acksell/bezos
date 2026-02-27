@@ -13,6 +13,97 @@
         loading: false
     };
 
+    // Pattern parsing utilities
+    function parsePattern(pattern) {
+        // Parse pattern like "USER#{id}" into { prefix: "USER#", variables: ["id"], regex: /^USER#(.+)$/ }
+        if (!pattern) return null;
+        
+        const parts = [];
+        const variables = [];
+        let regex = '^';
+        let lastEnd = 0;
+        
+        const varRegex = /#\{(\w+)\}/g;
+        let match;
+        
+        while ((match = varRegex.exec(pattern)) !== null) {
+            const prefix = pattern.slice(lastEnd, match.index);
+            if (prefix) {
+                parts.push({ type: 'static', value: prefix });
+                regex += escapeRegex(prefix);
+            }
+            parts.push({ type: 'variable', name: match[1] });
+            variables.push(match[1]);
+            regex += '(.+?)';
+            lastEnd = match.index + match[0].length;
+        }
+        
+        const suffix = pattern.slice(lastEnd);
+        if (suffix) {
+            parts.push({ type: 'static', value: suffix });
+            regex += escapeRegex(suffix);
+        }
+        regex += '$';
+        
+        return {
+            pattern,
+            parts,
+            variables,
+            regex: new RegExp(regex),
+            isStatic: variables.length === 0
+        };
+    }
+
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function matchPattern(parsedPattern, value) {
+        if (!parsedPattern || !value) return null;
+        const match = String(value).match(parsedPattern.regex);
+        if (!match) return null;
+        
+        const result = {};
+        parsedPattern.variables.forEach((v, i) => {
+            result[v] = match[i + 1];
+        });
+        return result;
+    }
+
+    function buildFromPattern(parsedPattern, values) {
+        if (!parsedPattern) return '';
+        return parsedPattern.parts.map(p => {
+            if (p.type === 'static') return p.value;
+            return values[p.name] || '';
+        }).join('');
+    }
+
+    // Entity detection
+    function detectEntityType(item, schema) {
+        if (!schema || !schema.entities) return null;
+        
+        const pkName = schema.table.partitionKey.name;
+        const skName = schema.table.sortKey?.name;
+        const pkVal = item[pkName];
+        const skVal = skName ? item[skName] : null;
+        
+        for (const entity of schema.entities) {
+            const pkParsed = parsePattern(entity.partitionKeyPattern);
+            const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+            
+            const pkMatch = matchPattern(pkParsed, pkVal);
+            if (!pkMatch) continue;
+            
+            if (skParsed) {
+                const skMatch = matchPattern(skParsed, skVal);
+                if (!skMatch) continue;
+            }
+            
+            return entity.type;
+        }
+        return null;
+    }
+
     // API Client
     const api = {
         async get(path) {
@@ -62,40 +153,92 @@
         try {
             const data = await api.get('/tables');
             state.tables = data.tables;
-            renderTableList();
+            await renderTableList();
         } catch (err) {
             console.error('Failed to load tables:', err);
         }
     }
 
-    // Render table list in sidebar
-    function renderTableList() {
+    // Render table list in sidebar with entities pre-loaded
+    async function renderTableList() {
         const list = $('#table-list');
+        
+        // First render table structure
         list.innerHTML = state.tables.map(t => `
-            <li>
-                <a href="#" data-table="${t.name}">
+            <li class="table-item">
+                <a href="#" class="table-link" data-table="${t.name}">
                     ${t.name}
-                    <span class="badge">${t.entityCount} entities</span>
                 </a>
+                <ul class="entity-list" id="entities-${t.name}">
+                    <li class="loading-entities">Loading...</li>
+                </ul>
             </li>
         `).join('');
+        
+        // Then load entities for each table
+        for (const t of state.tables) {
+            try {
+                const schema = await api.get(`/tables/${t.name}`);
+                const entityList = $(`#entities-${t.name}`);
+                if (entityList) {
+                    const entities = schema.entities || [];
+                    if (entities.length > 0) {
+                        entityList.innerHTML = entities.map(e => `
+                            <li>
+                                <a href="#" class="entity-link" data-table="${t.name}" data-entity="${e.type}">
+                                    ${e.type}
+                                </a>
+                            </li>
+                        `).join('');
+                    } else {
+                        entityList.innerHTML = '<li class="no-entities">No entities</li>';
+                    }
+                }
+            } catch (err) {
+                console.error(`Failed to load entities for ${t.name}:`, err);
+                const entityList = $(`#entities-${t.name}`);
+                if (entityList) {
+                    entityList.innerHTML = '<li class="no-entities">Failed to load</li>';
+                }
+            }
+        }
+    }
+
+    // Render entities under a table in sidebar (for refresh)
+    async function renderTableEntities(tableName) {
+        // Already loaded in renderTableList, this is now a no-op
+        // but kept for compatibility
     }
 
     // Select a table
-    async function selectTable(tableName) {
+    async function selectTable(tableName, options = {}) {
+        const { entity = null, switchToQuery = false } = options;
+        
         // Update active state
-        $$('.table-list a').forEach(a => a.classList.remove('active'));
-        $(`.table-list a[data-table="${tableName}"]`).classList.add('active');
+        $$('.table-list .table-link').forEach(a => a.classList.remove('active'));
+        $$('.table-list .entity-link').forEach(a => a.classList.remove('active'));
+        
+        if (entity) {
+            const entityLink = $(`.entity-link[data-table="${tableName}"][data-entity="${entity}"]`);
+            if (entityLink) entityLink.classList.add('active');
+        } else {
+            const tableLink = $(`.table-link[data-table="${tableName}"]`);
+            if (tableLink) tableLink.classList.add('active');
+        }
 
         // Load table schema
         try {
+            const needsLoad = state.currentTable !== tableName;
             state.currentTable = tableName;
-            state.currentSchema = await api.get(`/tables/${tableName}`);
-            state.items = [];
-            state.lastKey = null;
+            
+            if (needsLoad) {
+                state.currentSchema = await api.get(`/tables/${tableName}`);
+                state.items = [];
+                state.lastKey = null;
+            }
 
             // Update UI
-            $('#table-name').textContent = tableName;
+            $('#table-name').textContent = entity ? `${tableName} / ${entity}` : tableName;
             $('#welcome-view').classList.remove('active');
             $('#table-view').classList.add('active');
 
@@ -104,9 +247,31 @@
 
             // Populate query index dropdown
             populateIndexDropdown();
+            
+            // Populate entity dropdown for queries
+            populateEntityDropdown();
+            
+            // Render entities in sidebar
+            await renderTableEntities(tableName);
 
-            // Load data
-            await loadData();
+            // If entity selected, switch to query tab and select entity
+            if (switchToQuery && entity) {
+                // Switch to query tab
+                $$('.tab').forEach(t => t.classList.remove('active'));
+                $$('.tab-content').forEach(c => c.classList.remove('active'));
+                $('.tab[data-tab="query"]').classList.add('active');
+                $('#tab-query').classList.add('active');
+                
+                // Select the entity in dropdown
+                const entitySelect = $('#query-entity');
+                if (entitySelect) {
+                    entitySelect.value = entity;
+                    renderEntityQueryFields(entity);
+                }
+            } else if (needsLoad) {
+                // Load data only when switching tables (not entities)
+                await loadData();
+            }
         } catch (err) {
             console.error('Failed to load table:', err);
             alert('Failed to load table: ' + err.message);
@@ -117,44 +282,32 @@
     function renderSchema() {
         const schema = state.currentSchema;
 
-        // Table structure
-        let tableHtml = `
-            <div class="schema-card">
-                <div class="schema-row">
-                    <span class="schema-label">Partition Key:</span>
-                    <span class="schema-value">${schema.table.partitionKey.name} (${schema.table.partitionKey.kind})</span>
-                </div>
+        // Build indexes table (Primary + GSIs as columns)
+        const gsis = schema.table.gsis || [];
+        let indexHtml = `
+            <table class="index-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Primary</th>
+                        ${gsis.map(g => `<th>${g.name}</th>`).join('')}
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="row-label">PK</td>
+                        <td><code>${schema.table.partitionKey.name}</code> <span class="key-type">${schema.table.partitionKey.kind}</span></td>
+                        ${gsis.map(g => `<td><code>${g.partitionKey.name}</code> <span class="key-type">${g.partitionKey.kind}</span></td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="row-label">SK</td>
+                        <td>${schema.table.sortKey ? `<code>${schema.table.sortKey.name}</code> <span class="key-type">${schema.table.sortKey.kind}</span>` : '<span class="no-key">—</span>'}</td>
+                        ${gsis.map(g => `<td>${g.sortKey ? `<code>${g.sortKey.name}</code> <span class="key-type">${g.sortKey.kind}</span>` : '<span class="no-key">—</span>'}</td>`).join('')}
+                    </tr>
+                </tbody>
+            </table>
         `;
-        if (schema.table.sortKey) {
-            tableHtml += `
-                <div class="schema-row">
-                    <span class="schema-label">Sort Key:</span>
-                    <span class="schema-value">${schema.table.sortKey.name} (${schema.table.sortKey.kind})</span>
-                </div>
-            `;
-        }
-        tableHtml += '</div>';
-        $('#schema-table').innerHTML = tableHtml;
-
-        // GSIs
-        if (schema.table.gsis && schema.table.gsis.length > 0) {
-            $('#schema-gsis').innerHTML = schema.table.gsis.map(gsi => `
-                <div class="schema-card">
-                    <h4>${gsi.name}</h4>
-                    <div class="schema-row">
-                        <span class="schema-label">Partition Key:</span>
-                        <span class="schema-value">${gsi.partitionKey.name} (${gsi.partitionKey.kind})</span>
-                    </div>
-                    ${gsi.sortKey ? `
-                    <div class="schema-row">
-                        <span class="schema-label">Sort Key:</span>
-                        <span class="schema-value">${gsi.sortKey.name} (${gsi.sortKey.kind})</span>
-                    </div>` : ''}
-                </div>
-            `).join('');
-        } else {
-            $('#schema-gsis').innerHTML = '<p class="placeholder">No GSIs defined</p>';
-        }
+        $('#schema-indexes').innerHTML = indexHtml;
 
         // Entities
         if (schema.entities && schema.entities.length > 0) {
@@ -211,6 +364,213 @@
         });
     }
 
+    // Populate entity dropdown for queries and render dynamic form
+    function populateEntityDropdown() {
+        const select = $('#query-entity');
+        if (!select) return;
+        
+        const entities = state.currentSchema?.entities || [];
+        select.innerHTML = '<option value="">-- Select Entity --</option>';
+        entities.forEach(e => {
+            select.innerHTML += `<option value="${e.type}">${e.type}</option>`;
+        });
+        
+        // Clear the dynamic fields
+        renderEntityQueryFields(null);
+    }
+
+    // Render entity query form fields based on selected entity
+    function renderEntityQueryFields(entityType) {
+        const container = $('#entity-query-fields');
+        if (!container) return;
+        
+        if (!entityType) {
+            container.innerHTML = '<p class="placeholder">Select an entity to see query fields</p>';
+            return;
+        }
+        
+        const entity = state.currentSchema?.entities?.find(e => e.type === entityType);
+        if (!entity) {
+            container.innerHTML = '<p class="placeholder">Entity not found</p>';
+            return;
+        }
+        
+        const pkParsed = parsePattern(entity.partitionKeyPattern);
+        const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+        
+        let html = '';
+        
+        // Pattern preview
+        html += `<div class="pattern-preview">`;
+        html += `<div class="pattern-item"><span class="pattern-label">PK:</span> <code>${entity.partitionKeyPattern}</code></div>`;
+        if (entity.sortKeyPattern) {
+            html += `<div class="pattern-item"><span class="pattern-label">SK:</span> <code>${entity.sortKeyPattern}</code></div>`;
+        }
+        html += `</div>`;
+        
+        // Collect PK variables
+        const pkVars = pkParsed?.variables || [];
+        // Collect SK variables (excluding those already in PK)
+        const skVars = (skParsed?.variables || []).filter(v => !pkVars.includes(v));
+        
+        // If patterns are static, show simple message
+        if (pkVars.length === 0 && skVars.length === 0) {
+            if (pkParsed?.isStatic) {
+                html += `<p class="info-text">PK is static: <code>${entity.partitionKeyPattern}</code></p>`;
+            }
+            if (skParsed?.isStatic) {
+                html += `<p class="info-text">SK is static: <code>${entity.sortKeyPattern}</code></p>`;
+            }
+        } else {
+            // Partition Key variables section
+            if (pkVars.length > 0) {
+                html += `<div class="query-section-group">`;
+                html += `<h4 class="query-section-title">Partition Key</h4>`;
+                html += `<div class="query-fields-grid">`;
+                for (const varName of pkVars) {
+                    html += `
+                        <div class="form-group">
+                            <label for="qv-${varName}">${varName}:</label>
+                            <input type="text" id="qv-${varName}" class="query-var" data-var="${varName}" placeholder="Enter ${varName}">
+                        </div>
+                    `;
+                }
+                html += `</div></div>`;
+            }
+            
+            // Sort Key variables section (if any unique to SK)
+            if (skVars.length > 0) {
+                html += `<div class="query-section-group">`;
+                html += `<h4 class="query-section-title">Sort Key</h4>`;
+                html += `<div class="query-fields-grid">`;
+                for (const varName of skVars) {
+                    html += `
+                        <div class="form-group">
+                            <label for="qv-${varName}">${varName}:</label>
+                            <input type="text" id="qv-${varName}" class="query-var" data-var="${varName}" placeholder="Enter ${varName}">
+                        </div>
+                    `;
+                }
+                html += `</div></div>`;
+            }
+        }
+        
+        // Sort key operation (if entity has SK)
+        if (skParsed) {
+            html += `
+                <div class="sk-options">
+                    <div class="form-group">
+                        <label for="query-sk-mode">Sort Key Query Mode:</label>
+                        <select id="query-sk-mode">
+                            <option value="exact">Exact Match</option>
+                            <option value="begins_with">Begins With (prefix)</option>
+                            <option value="none">Any (no SK condition)</option>
+                        </select>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `<button id="btn-entity-query" class="btn btn-primary">Run Query</button>`;
+        
+        container.innerHTML = html;
+        
+        // Re-attach event listener for the button
+        const btn = $('#btn-entity-query');
+        if (btn) {
+            btn.addEventListener('click', runEntityQuery);
+        }
+    }
+
+    // Run query based on entity form
+    async function runEntityQuery() {
+        const entityType = $('#query-entity')?.value;
+        if (!entityType) {
+            alert('Please select an entity');
+            return;
+        }
+        
+        const entity = state.currentSchema?.entities?.find(e => e.type === entityType);
+        if (!entity) return;
+        
+        const pkParsed = parsePattern(entity.partitionKeyPattern);
+        const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+        
+        // Gather variable values
+        const varValues = {};
+        document.querySelectorAll('.query-var').forEach(input => {
+            varValues[input.dataset.var] = input.value;
+        });
+        
+        // Build the actual PK value
+        const pkVal = buildFromPattern(pkParsed, varValues);
+        if (!pkVal) {
+            alert('Partition key value is required');
+            return;
+        }
+        
+        // Build query
+        const schema = state.currentSchema;
+        const pkName = schema.table.partitionKey.name;
+        const pkKind = schema.table.partitionKey.kind;
+        const skName = schema.table.sortKey?.name;
+        const skKind = schema.table.sortKey?.kind;
+        
+        let expr = '#pk = :pk';
+        const names = { '#pk': pkName };
+        // Convert pk value based on key type
+        const values = { ':pk': convertKeyValue(pkVal, pkKind) };
+        
+        // Handle sort key based on mode
+        const skMode = $('#query-sk-mode')?.value || 'none';
+        if (skParsed && skName && skMode !== 'none') {
+            const skVal = buildFromPattern(skParsed, varValues);
+            names['#sk'] = skName;
+            // Convert sk value based on key type
+            values[':sk'] = convertKeyValue(skVal, skKind);
+            
+            if (skMode === 'exact') {
+                expr += ' AND #sk = :sk';
+            } else if (skMode === 'begins_with') {
+                expr += ' AND begins_with(#sk, :sk)';
+            }
+        }
+        
+        const body = {
+            keyConditionExpression: expr,
+            expressionAttributeNames: names,
+            expressionAttributeValues: values,
+            limit: 50
+        };
+        
+        console.log('Query body:', JSON.stringify(body, null, 2));
+        
+        try {
+            const data = await api.post(`/tables/${state.currentTable}/query`, body);
+            renderQueryResults(data.items);
+        } catch (err) {
+            console.error('Query failed:', err);
+            alert('Query failed: ' + err.message);
+        }
+    }
+    
+    // Convert a key value based on the key kind (S, N, B)
+    function convertKeyValue(value, kind) {
+        if (!value) return value;
+        switch (kind) {
+            case 'N':
+                // Number - return as-is, backend will convert
+                return value;
+            case 'B':
+                // Binary - encode as base64
+                // The value is already a string, encode it to base64
+                return btoa(value);
+            case 'S':
+            default:
+                return value;
+        }
+    }
+
     // Load data (scan)
     async function loadData(append = false) {
         if (state.loading) return;
@@ -248,6 +608,12 @@
         const pkName = schema.table.partitionKey.name;
         const skName = schema.table.sortKey?.name;
 
+        // Pre-compute entity types for all items
+        const itemsWithEntity = state.items.map(item => ({
+            item,
+            entityType: detectEntityType(item, schema)
+        }));
+
         // Get all unique keys from items
         const allKeys = new Set();
         state.items.forEach(item => {
@@ -263,10 +629,13 @@
             return a.localeCompare(b);
         });
 
+        // Add Entity as first column
+        const columns = ['_entity', ...sortedKeys];
+
         // Render header
         $('#data-thead').innerHTML = `
             <tr>
-                ${sortedKeys.map(k => `<th>${k}</th>`).join('')}
+                ${columns.map(k => `<th>${k === '_entity' ? 'Entity' : k}</th>`).join('')}
             </tr>
         `;
 
@@ -274,14 +643,15 @@
         if (state.items.length === 0) {
             $('#data-tbody').innerHTML = `
                 <tr>
-                    <td colspan="${sortedKeys.length}" class="empty-state">
+                    <td colspan="${columns.length}" class="empty-state">
                         No items found
                     </td>
                 </tr>
             `;
         } else {
-            $('#data-tbody').innerHTML = state.items.map((item, idx) => `
+            $('#data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType }, idx) => `
                 <tr data-index="${idx}">
+                    <td><span class="entity-badge" data-entity="${entityType || 'unknown'}">${entityType || '?'}</span></td>
                     ${sortedKeys.map(k => {
                         const val = item[k];
                         const isKey = k === pkName || k === skName;
@@ -503,10 +873,20 @@
     function setupEventListeners() {
         // Table selection
         $('#table-list').addEventListener('click', (e) => {
-            const link = e.target.closest('a[data-table]');
-            if (link) {
+            const entityLink = e.target.closest('a.entity-link');
+            if (entityLink) {
                 e.preventDefault();
-                selectTable(link.dataset.table);
+                selectTable(entityLink.dataset.table, { 
+                    entity: entityLink.dataset.entity, 
+                    switchToQuery: true 
+                });
+                return;
+            }
+            
+            const tableLink = e.target.closest('a.table-link');
+            if (tableLink) {
+                e.preventDefault();
+                selectTable(tableLink.dataset.table);
             }
         });
 
@@ -560,14 +940,42 @@
         // Delete item
         $('#btn-delete-item').addEventListener('click', deleteItem);
 
-        // Sort key operator change
-        $('#query-sk-op').addEventListener('change', (e) => {
-            const val2 = $('#query-sk-val2');
-            val2.style.display = e.target.value === 'between' ? 'block' : 'none';
-        });
+        // Sort key operator change (for advanced query)
+        const skOpSelect = $('#query-sk-op');
+        if (skOpSelect) {
+            skOpSelect.addEventListener('change', (e) => {
+                const val2 = $('#query-sk-val2');
+                if (val2) val2.style.display = e.target.value === 'between' ? 'block' : 'none';
+            });
+        }
 
-        // Run query
-        $('#btn-run-query').addEventListener('click', runQuery);
+        // Run query (advanced)
+        const runQueryBtn = $('#btn-run-query');
+        if (runQueryBtn) {
+            runQueryBtn.addEventListener('click', runQuery);
+        }
+        
+        // Query entity selection - update sidebar and breadcrumbs too
+        document.addEventListener('change', (e) => {
+            if (e.target.id === 'query-entity') {
+                const entityType = e.target.value;
+                renderEntityQueryFields(entityType);
+                
+                // Update sidebar highlighting
+                $$('.table-list .entity-link').forEach(a => a.classList.remove('active'));
+                if (entityType && state.currentTable) {
+                    const entityLink = $(`.entity-link[data-table="${state.currentTable}"][data-entity="${entityType}"]`);
+                    if (entityLink) entityLink.classList.add('active');
+                    // Update breadcrumb
+                    $('#table-name').textContent = `${state.currentTable} / ${entityType}`;
+                } else if (state.currentTable) {
+                    // Reset to table only
+                    const tableLink = $(`.table-link[data-table="${state.currentTable}"]`);
+                    if (tableLink) tableLink.classList.add('active');
+                    $('#table-name').textContent = state.currentTable;
+                }
+            }
+        });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {

@@ -69,11 +69,11 @@ body {
     list-style: none;
 }
 
-.table-list li {
+.table-list .table-item {
     margin-bottom: 0.25rem;
 }
 
-.table-list a {
+.table-list .table-link {
     display: flex;
     align-items: center;
     padding: 0.5rem 0.75rem;
@@ -81,15 +81,59 @@ body {
     text-decoration: none;
     border-radius: 0.375rem;
     transition: background 0.15s;
+    font-weight: 500;
 }
 
-.table-list a:hover {
+.table-list .table-link:hover {
     background: var(--bg-tertiary);
 }
 
-.table-list a.active {
+.table-list .table-link.active {
     background: var(--accent);
     color: white;
+}
+
+/* Entity list nested under tables */
+.entity-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    padding-left: 1rem;
+}
+
+.entity-list li {
+    margin-bottom: 0.125rem;
+}
+
+.entity-list .entity-link {
+    display: flex;
+    align-items: center;
+    padding: 0.375rem 0.75rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-radius: 0.375rem;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+}
+
+.entity-list .entity-link:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.entity-list .entity-link.active {
+    background: rgba(233, 69, 96, 0.15);
+    color: var(--accent);
+    border-left-color: var(--accent);
+}
+
+.entity-list .loading-entities,
+.entity-list .no-entities {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .table-list .badge {
@@ -412,13 +456,16 @@ textarea {
 .query-builder {
     background: var(--bg-secondary);
     border-radius: 0.375rem;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
     border: 1px solid var(--border);
 }
 
 .form-group {
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .form-group:last-child {
@@ -426,16 +473,16 @@ textarea {
 }
 
 .form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
     font-size: 0.875rem;
     color: var(--text-secondary);
+    white-space: nowrap;
+    min-width: fit-content;
 }
 
 .form-group input,
 .form-group select {
-    width: 100%;
-    max-width: 400px;
+    flex: 1;
+    max-width: 300px;
 }
 
 .inline-group {
@@ -560,4 +607,232 @@ textarea {
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+/* Entity Badge */
+.entity-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+/* Generate different colors for different entity types */
+.entity-badge[data-entity="unknown"] {
+    background: var(--border);
+    color: var(--text-secondary);
+}
+
+/* Use hash-based colors for entity types */
+.entity-badge:not([data-entity="unknown"]) {
+    background: hsl(var(--entity-hue, 200), 60%, 30%);
+    color: hsl(var(--entity-hue, 200), 60%, 90%);
+}
+
+/* Predefined colors for common entity names */
+.entity-badge[data-entity*="User"],
+.entity-badge[data-entity*="user"] {
+    --entity-hue: 210;
+}
+
+.entity-badge[data-entity*="Order"],
+.entity-badge[data-entity*="order"] {
+    --entity-hue: 140;
+}
+
+.entity-badge[data-entity*="Product"],
+.entity-badge[data-entity*="product"] {
+    --entity-hue: 30;
+}
+
+.entity-badge[data-entity*="Session"],
+.entity-badge[data-entity*="session"] {
+    --entity-hue: 280;
+}
+
+.entity-badge[data-entity*="Message"],
+.entity-badge[data-entity*="message"] {
+    --entity-hue: 340;
+}
+
+.entity-badge[data-entity*="Event"],
+.entity-badge[data-entity*="event"] {
+    --entity-hue: 170;
+}
+
+/* Query Section */
+.query-section {
+    margin-bottom: 1.5rem;
+}
+
+.query-section h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+/* Advanced Query (Collapsible) */
+.advanced-query {
+    margin-bottom: 1.5rem;
+}
+
+.advanced-query summary {
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.advanced-query summary:hover {
+    background: var(--bg-tertiary);
+}
+
+.advanced-query[open] summary {
+    border-radius: 0.375rem 0.375rem 0 0;
+    border-bottom: none;
+    color: var(--text-primary);
+}
+
+.advanced-query .query-builder {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    margin-bottom: 0;
+}
+
+/* Pattern Preview */
+.pattern-preview {
+    background: var(--bg-tertiary);
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.8rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+}
+
+.pattern-item {
+    display: flex;
+    gap: 0.375rem;
+}
+
+.pattern-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.pattern-preview code {
+    font-family: 'Menlo', 'Monaco', monospace;
+    color: var(--success);
+}
+
+/* Query Fields Grid */
+.query-fields-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.query-fields-grid .form-group {
+    margin-bottom: 0;
+    min-width: 180px;
+}
+
+/* Sort Key Options */
+.sk-options {
+    margin-bottom: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.sk-options .form-group {
+    margin-bottom: 0;
+}
+
+/* Info Text */
+.info-text {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.info-text code {
+    font-family: 'Menlo', 'Monaco', monospace;
+    color: var(--success);
+    background: var(--bg-tertiary);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+}
+
+/* Index Table (Schema) */
+.index-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    background: var(--bg-tertiary);
+    border-radius: 0.375rem;
+    overflow: hidden;
+}
+
+.index-table th {
+    text-align: left;
+    padding: 0.75rem 1rem;
+    background: var(--bg-primary);
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.index-table td {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.index-table tr:last-child td {
+    border-bottom: none;
+}
+
+.index-table .row-label {
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    width: 60px;
+}
+
+.index-table code {
+    font-family: 'Menlo', 'Monaco', monospace;
+    color: var(--success);
+}
+
+.index-table .key-type {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-left: 0.25rem;
+}
+
+.index-table .no-key {
+    color: var(--text-secondary);
+}
+
+/* Query Section Groups */
+.query-section-group {
+    margin-bottom: 0.75rem;
+}
+
+.query-section-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 0.375rem;
+    letter-spacing: 0.05em;
 }

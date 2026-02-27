@@ -40,7 +40,7 @@
                 </header>
 
                 <div class="tabs">
-                    <button class="tab active" data-tab="data">Data</button>
+                    <button class="tab active" data-tab="data">Scan</button>
                     <button class="tab" data-tab="schema">Schema</button>
                     <button class="tab" data-tab="query">Query</button>
                 </div>
@@ -48,12 +48,6 @@
                 <!-- Data Tab -->
                 <div id="tab-data" class="tab-content active">
                     <div class="toolbar">
-                        <div class="toolbar-group">
-                            <label>
-                                <input type="checkbox" id="scan-mode" checked>
-                                Scan Mode
-                            </label>
-                        </div>
                         <div class="toolbar-group">
                             <label>Limit:</label>
                             <select id="page-limit">
@@ -84,12 +78,8 @@
                 <div id="tab-schema" class="tab-content">
                     <div class="schema-container">
                         <section class="schema-section">
-                            <h3>Table Structure</h3>
-                            <div id="schema-table"></div>
-                        </section>
-                        <section class="schema-section">
-                            <h3>GSIs</h3>
-                            <div id="schema-gsis"></div>
+                            <h3>Indexes</h3>
+                            <div id="schema-indexes"></div>
                         </section>
                         <section class="schema-section">
                             <h3>Entities</h3>
@@ -100,39 +90,59 @@
 
                 <!-- Query Tab -->
                 <div id="tab-query" class="tab-content">
-                    <div class="query-builder">
-                        <div class="form-group">
-                            <label for="query-index">Index:</label>
-                            <select id="query-index">
-                                <option value="">Primary Index</option>
-                                <!-- GSIs populated by JS -->
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="query-pk">Partition Key Value:</label>
-                            <input type="text" id="query-pk" placeholder="e.g., USER#123">
-                        </div>
-                        <div class="form-group">
-                            <label for="query-sk-op">Sort Key Condition:</label>
-                            <div class="inline-group">
-                                <select id="query-sk-op">
-                                    <option value="">None</option>
-                                    <option value="=">=</option>
-                                    <option value="begins_with">begins_with</option>
-                                    <option value="<">&lt;</option>
-                                    <option value="<=">&lt;=</option>
-                                    <option value=">">&gt;</option>
-                                    <option value=">=">&gt;=</option>
-                                    <option value="between">between</option>
+                    <div class="query-section">
+                        <h3>Query by Entity</h3>
+                        <div class="query-builder">
+                            <div class="form-group">
+                                <label for="query-entity">Entity Type:</label>
+                                <select id="query-entity">
+                                    <option value="">-- Select Entity --</option>
+                                    <!-- Populated by JS -->
                                 </select>
-                                <input type="text" id="query-sk-val" placeholder="Sort key value">
-                                <input type="text" id="query-sk-val2" placeholder="End value" style="display:none">
+                            </div>
+                            <div id="entity-query-fields">
+                                <p class="placeholder">Select an entity to see query fields</p>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <button id="btn-run-query" class="btn btn-primary">Run Query</button>
-                        </div>
                     </div>
+                    
+                    <details class="advanced-query">
+                        <summary>Advanced Query (Raw Expression)</summary>
+                        <div class="query-builder">
+                            <div class="form-group">
+                                <label for="query-index">Index:</label>
+                                <select id="query-index">
+                                    <option value="">Primary Index</option>
+                                    <!-- GSIs populated by JS -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="query-pk">Partition Key Value:</label>
+                                <input type="text" id="query-pk" placeholder="e.g., USER#123">
+                            </div>
+                            <div class="form-group">
+                                <label for="query-sk-op">Sort Key Condition:</label>
+                                <div class="inline-group">
+                                    <select id="query-sk-op">
+                                        <option value="">None</option>
+                                        <option value="=">=</option>
+                                        <option value="begins_with">begins_with</option>
+                                        <option value="<">&lt;</option>
+                                        <option value="<=">&lt;=</option>
+                                        <option value=">">&gt;</option>
+                                        <option value=">=">&gt;=</option>
+                                        <option value="between">between</option>
+                                    </select>
+                                    <input type="text" id="query-sk-val" placeholder="Sort key value">
+                                    <input type="text" id="query-sk-val2" placeholder="End value" style="display:none">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <button id="btn-run-query" class="btn btn-primary">Run Query</button>
+                            </div>
+                        </div>
+                    </details>
+                    
                     <div class="query-results">
                         <h3>Results</h3>
                         <div id="query-results-container">

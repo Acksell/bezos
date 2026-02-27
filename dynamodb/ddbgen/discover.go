@@ -313,7 +313,7 @@ func resolveTableDefinition(tableExpr ast.Expr, files []*ast.File) resolvedTable
 				if len(vs.Values) == 0 {
 					continue
 				}
-				return extractTableDefFromLiteral(vs.Values[0])
+				return extractTableDefFromLiteral(vs.Values[0], files)
 			}
 		}
 	}
@@ -321,7 +321,7 @@ func resolveTableDefinition(tableExpr ast.Expr, files []*ast.File) resolvedTable
 }
 
 // extractTableDefFromLiteral parses a TableDefinition composite literal.
-func extractTableDefFromLiteral(expr ast.Expr) resolvedTableDef {
+func extractTableDefFromLiteral(expr ast.Expr, files []*ast.File) resolvedTableDef {
 	var def resolvedTableDef
 	lit, ok := expr.(*ast.CompositeLit)
 	if !ok {
@@ -339,7 +339,7 @@ func extractTableDefFromLiteral(expr ast.Expr) resolvedTableDef {
 		}
 		switch key.Name {
 		case "Name":
-			def.Name = extractStringLiteral(kv.Value)
+			def.Name = extractStringValue(kv.Value, files)
 		case "KeyDefinitions":
 			def.PKDefName, def.SKDefName = parsePrimaryKeyDefFields(kv.Value)
 		}
@@ -609,6 +609,42 @@ func extractStringLiteral(expr ast.Expr) string {
 		}
 	}
 	return s
+}
+
+// extractStringValue extracts a string value from a literal or constant reference.
+func extractStringValue(expr ast.Expr, files []*ast.File) string {
+	// Try direct string literal first
+	if s := extractStringLiteral(expr); s != "" {
+		return s
+	}
+
+	// Try resolving as a constant reference
+	ident, ok := expr.(*ast.Ident)
+	if !ok || files == nil {
+		return ""
+	}
+
+	// Search for the constant declaration
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, name := range vs.Names {
+					if name.Name == ident.Name && i < len(vs.Values) {
+						return extractStringLiteral(vs.Values[i])
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // extractLiteral extracts the string representation of a basic literal (string, int, or float).

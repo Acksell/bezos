@@ -3,7 +3,6 @@ package ddbui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/acksell/bezos/dynamodb/table"
 	"gopkg.in/yaml.v3"
@@ -60,6 +59,11 @@ type GSIMappingYAML struct {
 	SortPattern      string `yaml:"sortPattern,omitempty" json:"sortPattern,omitempty"`
 }
 
+// SchemaFileRoot is the root structure for schema_dynamodb.yaml files.
+type SchemaFileRoot struct {
+	Tables []SchemaFile `yaml:"tables" json:"tables"`
+}
+
 // LoadedSchema contains all loaded schema information.
 type LoadedSchema struct {
 	// Tables maps table name to schema file
@@ -68,32 +72,30 @@ type LoadedSchema struct {
 	TableDefinitions []table.TableDefinition
 }
 
-// LoadSchemas loads schema files matching the given glob pattern.
-func LoadSchemas(pattern string) (*LoadedSchema, error) {
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("glob pattern error: %w", err)
-	}
-
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("no schema files found matching: %s", pattern)
+// LoadSchemas loads schema files from the given file paths.
+func LoadSchemas(files []string) (*LoadedSchema, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no schema files provided")
 	}
 
 	schema := &LoadedSchema{
 		Tables: make(map[string]*SchemaFile),
 	}
 
-	for _, path := range matches {
-		sf, err := loadSchemaFile(path)
+	for _, path := range files {
+		tables, err := loadSchemaFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("loading %s: %w", path, err)
 		}
 
-		if existing, ok := schema.Tables[sf.Table.Name]; ok {
-			// Merge entities into existing table schema
-			existing.Entities = append(existing.Entities, sf.Entities...)
-		} else {
-			schema.Tables[sf.Table.Name] = sf
+		for i := range tables {
+			sf := &tables[i]
+			if existing, ok := schema.Tables[sf.Table.Name]; ok {
+				// Merge entities into existing table schema
+				existing.Entities = append(existing.Entities, sf.Entities...)
+			} else {
+				schema.Tables[sf.Table.Name] = sf
+			}
 		}
 	}
 
@@ -106,23 +108,31 @@ func LoadSchemas(pattern string) (*LoadedSchema, error) {
 	return schema, nil
 }
 
-// loadSchemaFile reads and parses a single schema YAML file.
-func loadSchemaFile(path string) (*SchemaFile, error) {
+// loadSchemaFile reads and parses a schema_dynamodb.yaml file.
+// Returns all tables defined in the file.
+func loadSchemaFile(path string) ([]SchemaFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var sf SchemaFile
-	if err := yaml.Unmarshal(data, &sf); err != nil {
+	var root SchemaFileRoot
+	if err := yaml.Unmarshal(data, &root); err != nil {
 		return nil, err
 	}
 
-	if sf.Table.Name == "" {
-		return nil, fmt.Errorf("table name is required")
+	if len(root.Tables) == 0 {
+		return nil, fmt.Errorf("no tables defined in schema file")
 	}
 
-	return &sf, nil
+	// Validate each table
+	for i, sf := range root.Tables {
+		if sf.Table.Name == "" {
+			return nil, fmt.Errorf("table[%d]: name is required", i)
+		}
+	}
+
+	return root.Tables, nil
 }
 
 // toTableDefinition converts a SchemaFile to a runtime TableDefinition.

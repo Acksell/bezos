@@ -10,14 +10,21 @@
 //
 // Install the CLI:
 //
-//	go install github.com/acksell/bezos/dynamodb/ddbui/cmd/ddbui@latest
+//	go install github.com/acksell/bezos/dynamodb/cmd/ddb@latest
 //
-// Start the UI server:
+// Start the UI server (auto-discovers schema files):
 //
-//	ddbui --schema ./schema_*.yaml --port 8080
+//	ddb ui
 //
-// This will start a web server at http://localhost:8080 with an in-memory database.
-// To persist data, provide a database path:
+// This will start a web server at http://localhost:3070 with data stored in .ddb/data/.
 //
-//	ddbui --schema ./schema_*.yaml --db ./data --port 8080
+// Use in-memory mode for ephemeral data:
+//
+//	ddb ui --memory
+//
+// Configure defaults via ddb.yaml in your project root:
+//
+//	schemaDir: ./schemas
+//	dataDir: .ddb/data
+//	port: 3070
 package ddbui

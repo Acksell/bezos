@@ -2,20 +2,24 @@
 //
 // # Installation
 //
-//	go install github.com/acksell/bezos/dynamodb/ddbgen/cmd/ddbgen@latest
+//	go install github.com/acksell/bezos/dynamodb/cmd/ddb@latest
 //
 // # Usage
 //
 // Add a go:generate directive to your package that contains the index definitions.
 //
-//	//go:generate ddbgen
+//	//go:generate ddb gen
 //
 //	var userIndex = index.PrimaryIndex[User]{
 //	    Table:        UserTable,
-//	    PartitionKey: "USER#{id}",
-//	    SortKey:      "PROFILE",
+//	    PartitionKey: val.Fmt("USER#{id}"),
+//	    SortKey:      val.Fmt("PROFILE").Ptr(),
 //	}
 //
 // The generator will scan the package, discover index definitions,
-// and generate type-safe key constructors.
+// and generate type-safe key constructors plus schema YAML files.
+//
+// To generate code only (no schema files):
+//
+//	ddb gen --no-yaml
 package ddbgen
