@@ -6,75 +6,20 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/acksell/bezos/dynamodb/schema"
 	"gopkg.in/yaml.v3"
 )
 
-// SchemaFile is the root structure for the schema_dynamodb.yaml file.
-type SchemaFile struct {
-	Tables []SchemaOutput `yaml:"tables"`
-}
-
-// SchemaOutput represents the YAML schema for a single table.
-type SchemaOutput struct {
-	Table    TableSchema    `yaml:"table"`
-	Entities []EntitySchema `yaml:"entities"`
-}
-
-// TableSchema describes a DynamoDB table structure.
-type TableSchema struct {
-	Name         string      `yaml:"name"`
-	PartitionKey KeyDefYAML  `yaml:"partitionKey"`
-	SortKey      *KeyDefYAML `yaml:"sortKey,omitempty"`
-	GSIs         []GSISchema `yaml:"gsis,omitempty"`
-}
-
-// KeyDefYAML is a key definition for YAML output.
-type KeyDefYAML struct {
-	Name string `yaml:"name"`
-	Kind string `yaml:"kind"` // "S", "N", or "B"
-}
-
-// GSISchema describes a Global Secondary Index.
-type GSISchema struct {
-	Name         string      `yaml:"name"`
-	PartitionKey KeyDefYAML  `yaml:"partitionKey"`
-	SortKey      *KeyDefYAML `yaml:"sortKey,omitempty"`
-}
-
-// EntitySchema describes an entity type stored in a table.
-type EntitySchema struct {
-	Type                string           `yaml:"type"`
-	PartitionKeyPattern string           `yaml:"partitionKeyPattern"`
-	SortKeyPattern      string           `yaml:"sortKeyPattern,omitempty"`
-	Fields              []FieldSchema    `yaml:"fields"`
-	GSIMappings         []GSIMappingYAML `yaml:"gsiMappings,omitempty"`
-	IsVersioned         bool             `yaml:"isVersioned,omitempty"`
-}
-
-// FieldSchema describes an entity field.
-type FieldSchema struct {
-	Name string `yaml:"name"`
-	Tag  string `yaml:"tag"`
-	Type string `yaml:"type"`
-}
-
-// GSIMappingYAML describes how an entity maps to a GSI.
-type GSIMappingYAML struct {
-	GSI              string `yaml:"gsi"`
-	PartitionPattern string `yaml:"partitionPattern"`
-	SortPattern      string `yaml:"sortPattern,omitempty"`
-}
-
-// GenerateSchemas converts a DiscoverResult into per-table SchemaOutputs.
-// Returns a slice of SchemaOutput, one per table.
-func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
+// GenerateSchemas converts a DiscoverResult into a Schema.
+// Returns a schema.Schema containing all tables and entities.
+func GenerateSchemas(result *DiscoverResult) (schema.Schema, error) {
 	if len(result.Indexes) == 0 {
-		return nil, fmt.Errorf("no indexes to generate schemas for")
+		return schema.Schema{}, fmt.Errorf("no indexes to generate schemas for")
 	}
 
 	// Group indexes by table name
 	tableIndexes := make(map[string][]IndexInfo)
-	tableSchemas := make(map[string]*SchemaOutput)
+	tableSchemas := make(map[string]*schema.Table)
 
 	for _, idx := range result.Indexes {
 		tableName := idx.TableName
@@ -89,20 +34,18 @@ func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
 		// Use the first index to get table structure (all should share same table)
 		firstIdx := indexes[0]
 
-		schema := &SchemaOutput{
-			Table: TableSchema{
-				Name: tableName,
-				PartitionKey: KeyDefYAML{
-					Name: firstIdx.PKDefName,
-					Kind: string(firstIdx.PartitionKey.Kind),
-				},
+		tbl := &schema.Table{
+			Name: tableName,
+			PartitionKey: schema.KeyDef{
+				Name: firstIdx.PKDefName,
+				Kind: string(firstIdx.PartitionKey.Kind),
 			},
-			Entities: make([]EntitySchema, 0, len(indexes)),
+			Entities: make([]schema.Entity, 0, len(indexes)),
 		}
 
 		// Add sort key if present
 		if firstIdx.SortKey.Pattern != "" {
-			schema.Table.SortKey = &KeyDefYAML{
+			tbl.SortKey = &schema.KeyDef{
 				Name: firstIdx.SKDefName,
 				Kind: string(firstIdx.SortKey.Kind),
 			}
@@ -110,25 +53,25 @@ func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
 
 		// Add GSIs from the first index (table structure)
 		for _, gsi := range firstIdx.GSIs {
-			gsiSchema := GSISchema{
+			gsiSchema := schema.GSI{
 				Name: gsi.Name,
-				PartitionKey: KeyDefYAML{
+				PartitionKey: schema.KeyDef{
 					Name: gsi.PKDef,
 					Kind: string(gsi.PKPattern.Kind),
 				},
 			}
 			if gsi.SKPattern.Pattern != "" {
-				gsiSchema.SortKey = &KeyDefYAML{
+				gsiSchema.SortKey = &schema.KeyDef{
 					Name: gsi.SKDef,
 					Kind: string(gsi.SKPattern.Kind),
 				}
 			}
-			schema.Table.GSIs = append(schema.Table.GSIs, gsiSchema)
+			tbl.GSIs = append(tbl.GSIs, gsiSchema)
 		}
 
 		// Add entity schemas
 		for _, idx := range indexes {
-			entity := EntitySchema{
+			entity := schema.Entity{
 				Type:                idx.EntityType,
 				PartitionKeyPattern: idx.PartitionKey.Pattern,
 				IsVersioned:         idx.IsVersioned,
@@ -141,7 +84,7 @@ func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
 			// Add fields from discovery result
 			if fields, ok := result.EntityFields[idx.EntityType]; ok {
 				for _, f := range fields {
-					entity.Fields = append(entity.Fields, FieldSchema{
+					entity.Fields = append(entity.Fields, schema.Field{
 						Name: f.Name,
 						Tag:  f.Tag,
 						Type: f.Type,
@@ -151,7 +94,7 @@ func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
 
 			// Add GSI mappings
 			for _, gsi := range idx.GSIs {
-				mapping := GSIMappingYAML{
+				mapping := schema.GSIMapping{
 					GSI:              gsi.Name,
 					PartitionPattern: gsi.PKPattern.Pattern,
 				}
@@ -161,31 +104,29 @@ func GenerateSchemas(result *DiscoverResult) ([]SchemaOutput, error) {
 				entity.GSIMappings = append(entity.GSIMappings, mapping)
 			}
 
-			schema.Entities = append(schema.Entities, entity)
+			tbl.Entities = append(tbl.Entities, entity)
 		}
 
-		tableSchemas[tableName] = schema
+		tableSchemas[tableName] = tbl
 	}
 
 	// Convert map to slice
-	var schemas []SchemaOutput
-	for _, schema := range tableSchemas {
-		schemas = append(schemas, *schema)
+	var tables []schema.Table
+	for _, tbl := range tableSchemas {
+		tables = append(tables, *tbl)
 	}
 
-	return schemas, nil
+	return schema.Schema{Tables: tables}, nil
 }
 
 // WriteSchemas writes all schemas to a single schema_dynamodb.yaml file.
-func WriteSchemas(schemas []SchemaOutput, dir string) error {
+func WriteSchemas(s schema.Schema, dir string) error {
 	path := filepath.Join(dir, "schema_dynamodb.yaml")
-
-	file := SchemaFile{Tables: schemas}
 
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
 	encoder.SetIndent(1)
-	if err := encoder.Encode(file); err != nil {
+	if err := encoder.Encode(s); err != nil {
 		return fmt.Errorf("marshaling schemas: %w", err)
 	}
 	encoder.Close()

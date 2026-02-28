@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/acksell/bezos/dynamodb/ddbstore"
 	"github.com/acksell/bezos/dynamodb/ddbui"
 )
 
@@ -99,11 +100,28 @@ Schema files must contain the header:
 
 	fmt.Printf("ddb ui: found %d schema file(s)\n", len(schemaFiles))
 
-	server, err := ddbui.NewServer(ddbui.ServerConfig{
-		Port:        serverPort,
-		DBPath:      dataDir,
-		SchemaFiles: schemaFiles,
-	})
+	// Load schemas from YAML files
+	schemas, err := ddbui.LoadSchemaFilesRaw(schemaFiles)
+	if err != nil {
+		return fmt.Errorf("loading schemas: %w", err)
+	}
+
+	// Extract table definitions for ddbstore
+	tableDefs := ddbui.TableDefinitionsFromSchemas(schemas...)
+
+	// Create ddbstore
+	storeOpts := ddbstore.StoreOptions{
+		Path:     dataDir,
+		InMemory: *memory || dataDir == "",
+	}
+	store, err := ddbstore.New(storeOpts, tableDefs...)
+	if err != nil {
+		return fmt.Errorf("creating store: %w", err)
+	}
+	defer store.Close()
+
+	// Create server
+	server, err := ddbui.NewServer(store, serverPort, schemas...)
 	if err != nil {
 		return err
 	}

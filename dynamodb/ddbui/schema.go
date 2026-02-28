@@ -5,49 +5,34 @@ import (
 	"os"
 
 	"github.com/acksell/bezos/dynamodb/index/val"
+	"github.com/acksell/bezos/dynamodb/schema"
 	"github.com/acksell/bezos/dynamodb/table"
 	"gopkg.in/yaml.v3"
 )
 
-// SchemaFile represents the YAML schema for a single table.
-type SchemaFile struct {
-	Table    TableSchema    `yaml:"table" json:"table"`
-	Entities []EntitySchema `yaml:"entities" json:"entities"`
+// LoadedSchema contains all loaded schema information with parsed patterns.
+// This is the internal representation used by ddbui, enriched with pattern
+// parsing information that isn't part of the raw schema.Schema.
+type LoadedSchema struct {
+	// Tables maps table name to enriched table info
+	Tables map[string]*EnrichedTable
+	// TableDefinitions are the runtime table definitions for ddbstore
+	TableDefinitions []table.TableDefinition
 }
 
-// TableSchema describes a DynamoDB table structure.
-type TableSchema struct {
-	Name         string      `yaml:"name" json:"name"`
-	PartitionKey KeyDefYAML  `yaml:"partitionKey" json:"partitionKey"`
-	SortKey      *KeyDefYAML `yaml:"sortKey,omitempty" json:"sortKey,omitempty"`
-	GSIs         []GSISchema `yaml:"gsis,omitempty" json:"gsis,omitempty"`
+// EnrichedTable wraps a schema.Table with parsed pattern information.
+type EnrichedTable struct {
+	schema.Table
+	// EnrichedEntities have parsed patterns for UI key building
+	EnrichedEntities []EnrichedEntity
 }
 
-// KeyDefYAML is a key definition for YAML.
-type KeyDefYAML struct {
-	Name string `yaml:"name" json:"name"`
-	Kind string `yaml:"kind" json:"kind"` // "S", "N", or "B"
-}
-
-// GSISchema describes a Global Secondary Index.
-type GSISchema struct {
-	Name         string      `yaml:"name" json:"name"`
-	PartitionKey KeyDefYAML  `yaml:"partitionKey" json:"partitionKey"`
-	SortKey      *KeyDefYAML `yaml:"sortKey,omitempty" json:"sortKey,omitempty"`
-}
-
-// EntitySchema describes an entity type stored in a table.
-type EntitySchema struct {
-	Type                string           `yaml:"type" json:"type"`
-	PartitionKeyPattern string           `yaml:"partitionKeyPattern" json:"partitionKeyPattern"`
-	SortKeyPattern      string           `yaml:"sortKeyPattern,omitempty" json:"sortKeyPattern,omitempty"`
-	Fields              []FieldSchema    `yaml:"fields" json:"fields"`
-	GSIMappings         []GSIMappingYAML `yaml:"gsiMappings,omitempty" json:"gsiMappings,omitempty"`
-	IsVersioned         bool             `yaml:"isVersioned,omitempty" json:"isVersioned,omitempty"`
-
-	// Parsed pattern info for UI - populated at load time, not from YAML
-	PartitionKeyParsed *ParsedPattern `yaml:"-" json:"partitionKeyParsed,omitempty"`
-	SortKeyParsed      *ParsedPattern `yaml:"-" json:"sortKeyParsed,omitempty"`
+// EnrichedEntity wraps a schema.Entity with parsed pattern information.
+type EnrichedEntity struct {
+	schema.Entity
+	// Parsed pattern info for UI - computed at load time
+	PartitionKeyParsed *ParsedPattern `json:"partitionKeyParsed,omitempty"`
+	SortKeyParsed      *ParsedPattern `json:"sortKeyParsed,omitempty"`
 }
 
 // ParsedPattern represents a parsed key pattern with its parts.
@@ -65,121 +50,168 @@ type PatternPart struct {
 	FieldType  string   `json:"fieldType,omitempty"`  // Go type of the field (from entity fields)
 }
 
-// FieldSchema describes an entity field.
-type FieldSchema struct {
-	Name string `yaml:"name" json:"name"`
-	Tag  string `yaml:"tag" json:"tag"`
-	Type string `yaml:"type" json:"type"`
-}
-
-// GSIMappingYAML describes how an entity maps to a GSI.
-type GSIMappingYAML struct {
-	GSI              string `yaml:"gsi" json:"gsi"`
-	PartitionPattern string `yaml:"partitionPattern" json:"partitionPattern"`
-	SortPattern      string `yaml:"sortPattern,omitempty" json:"sortPattern,omitempty"`
-}
-
-// SchemaFileRoot is the root structure for schema_dynamodb.yaml files.
-type SchemaFileRoot struct {
-	Tables []SchemaFile `yaml:"tables" json:"tables"`
-}
-
-// LoadedSchema contains all loaded schema information.
-type LoadedSchema struct {
-	// Tables maps table name to schema file
-	Tables map[string]*SchemaFile
-	// TableDefinitions are the runtime table definitions for ddbstore
-	TableDefinitions []table.TableDefinition
-}
-
-// LoadSchemas loads schema files from the given file paths.
-func LoadSchemas(files []string) (*LoadedSchema, error) {
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no schema files provided")
+// LoadFromSchema creates a LoadedSchema from one or more schema.Schema objects.
+// This is the primary constructor for embedded use cases.
+func LoadFromSchema(schemas ...schema.Schema) (*LoadedSchema, error) {
+	if len(schemas) == 0 {
+		return nil, fmt.Errorf("no schemas provided")
 	}
 
-	schema := &LoadedSchema{
-		Tables: make(map[string]*SchemaFile),
+	loaded := &LoadedSchema{
+		Tables: make(map[string]*EnrichedTable),
 	}
 
-	for _, path := range files {
-		tables, err := loadSchemaFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("loading %s: %w", path, err)
-		}
-
-		for i := range tables {
-			sf := &tables[i]
-			if existing, ok := schema.Tables[sf.Table.Name]; ok {
-				// Merge entities into existing table schema
-				existing.Entities = append(existing.Entities, sf.Entities...)
+	for _, s := range schemas {
+		for _, t := range s.Tables {
+			if existing, ok := loaded.Tables[t.Name]; ok {
+				// Merge entities into existing table
+				for _, entity := range t.Entities {
+					enriched := enrichEntity(entity)
+					existing.EnrichedEntities = append(existing.EnrichedEntities, enriched)
+					existing.Entities = append(existing.Entities, entity)
+				}
 			} else {
-				schema.Tables[sf.Table.Name] = sf
+				enrichedTable := &EnrichedTable{
+					Table:            t,
+					EnrichedEntities: make([]EnrichedEntity, 0, len(t.Entities)),
+				}
+				for _, entity := range t.Entities {
+					enrichedTable.EnrichedEntities = append(enrichedTable.EnrichedEntities, enrichEntity(entity))
+				}
+				loaded.Tables[t.Name] = enrichedTable
 			}
 		}
 	}
 
-	// Convert to table definitions and parse patterns
-	for _, sf := range schema.Tables {
-		def := toTableDefinition(sf)
-		schema.TableDefinitions = append(schema.TableDefinitions, def)
-
-		// Parse key patterns for each entity
-		for i := range sf.Entities {
-			parseEntityPatterns(&sf.Entities[i])
-		}
+	// Build table definitions
+	for _, t := range loaded.Tables {
+		loaded.TableDefinitions = append(loaded.TableDefinitions, toTableDefinition(&t.Table))
 	}
 
-	return schema, nil
+	return loaded, nil
+}
+
+// LoadSchemaFiles loads schema from YAML file paths.
+// This is used by the standalone CLI.
+func LoadSchemaFiles(files []string) (*LoadedSchema, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no schema files provided")
+	}
+
+	var schemas []schema.Schema
+	for _, path := range files {
+		s, err := loadSchemaFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("loading %s: %w", path, err)
+		}
+		schemas = append(schemas, s)
+	}
+
+	return LoadFromSchema(schemas...)
+}
+
+// LoadSchemaFilesRaw loads schema files and returns the raw schema.Schema objects.
+// This is used by the CLI to pass schemas to NewServer.
+func LoadSchemaFilesRaw(files []string) ([]schema.Schema, error) {
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no schema files provided")
+	}
+
+	var schemas []schema.Schema
+	for _, path := range files {
+		s, err := loadSchemaFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("loading %s: %w", path, err)
+		}
+		schemas = append(schemas, s)
+	}
+
+	return schemas, nil
+}
+
+// TableDefinitionsFromSchemas extracts table.TableDefinition objects from schemas.
+// This is useful for creating a ddbstore.Store with the correct table definitions.
+func TableDefinitionsFromSchemas(schemas ...schema.Schema) []table.TableDefinition {
+	seen := make(map[string]bool)
+	var defs []table.TableDefinition
+	for _, s := range schemas {
+		for _, t := range s.Tables {
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
+			defs = append(defs, toTableDefinition(&t))
+		}
+	}
+	return defs
 }
 
 // loadSchemaFile reads and parses a schema_dynamodb.yaml file.
-// Returns all tables defined in the file.
-func loadSchemaFile(path string) ([]SchemaFile, error) {
+func loadSchemaFile(path string) (schema.Schema, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return schema.Schema{}, err
 	}
 
-	var root SchemaFileRoot
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, err
+	var s schema.Schema
+	if err := yaml.Unmarshal(data, &s); err != nil {
+		return schema.Schema{}, err
 	}
 
-	if len(root.Tables) == 0 {
-		return nil, fmt.Errorf("no tables defined in schema file")
+	if len(s.Tables) == 0 {
+		return schema.Schema{}, fmt.Errorf("no tables defined in schema file")
 	}
 
 	// Validate each table
-	for i, sf := range root.Tables {
-		if sf.Table.Name == "" {
-			return nil, fmt.Errorf("table[%d]: name is required", i)
+	for i, t := range s.Tables {
+		if t.Name == "" {
+			return schema.Schema{}, fmt.Errorf("table[%d]: name is required", i)
 		}
 	}
 
-	return root.Tables, nil
+	return s, nil
 }
 
-// toTableDefinition converts a SchemaFile to a runtime TableDefinition.
-func toTableDefinition(sf *SchemaFile) table.TableDefinition {
+// enrichEntity parses the key patterns for an entity.
+func enrichEntity(entity schema.Entity) EnrichedEntity {
+	enriched := EnrichedEntity{Entity: entity}
+
+	// Build a map of field tag -> field type for resolving variable types
+	fieldTypes := make(map[string]string)
+	for _, f := range entity.Fields {
+		fieldTypes[f.Tag] = f.Type
+	}
+
+	if entity.PartitionKeyPattern != "" {
+		enriched.PartitionKeyParsed = parsePattern(entity.PartitionKeyPattern, fieldTypes)
+	}
+	if entity.SortKeyPattern != "" {
+		enriched.SortKeyParsed = parsePattern(entity.SortKeyPattern, fieldTypes)
+	}
+
+	return enriched
+}
+
+// toTableDefinition converts a schema.Table to a runtime TableDefinition.
+func toTableDefinition(t *schema.Table) table.TableDefinition {
 	def := table.TableDefinition{
-		Name: sf.Table.Name,
+		Name: t.Name,
 		KeyDefinitions: table.PrimaryKeyDefinition{
 			PartitionKey: table.KeyDef{
-				Name: sf.Table.PartitionKey.Name,
-				Kind: toKeyKind(sf.Table.PartitionKey.Kind),
+				Name: t.PartitionKey.Name,
+				Kind: toKeyKind(t.PartitionKey.Kind),
 			},
 		},
 	}
 
-	if sf.Table.SortKey != nil {
+	if t.SortKey != nil {
 		def.KeyDefinitions.SortKey = table.KeyDef{
-			Name: sf.Table.SortKey.Name,
-			Kind: toKeyKind(sf.Table.SortKey.Kind),
+			Name: t.SortKey.Name,
+			Kind: toKeyKind(t.SortKey.Kind),
 		}
 	}
 
-	for _, gsi := range sf.Table.GSIs {
+	for _, gsi := range t.GSIs {
 		gsiDef := table.GSIDefinition{
 			Name: gsi.Name,
 			KeyDefinitions: table.PrimaryKeyDefinition{
@@ -212,23 +244,6 @@ func toKeyKind(kind string) table.KeyKind {
 		return table.KeyKindB
 	default:
 		return table.KeyKindS
-	}
-}
-
-// parseEntityPatterns parses the partition and sort key patterns for an entity
-// and populates the parsed pattern fields.
-func parseEntityPatterns(entity *EntitySchema) {
-	// Build a map of field tag -> field type for resolving variable types
-	fieldTypes := make(map[string]string)
-	for _, f := range entity.Fields {
-		fieldTypes[f.Tag] = f.Type
-	}
-
-	if entity.PartitionKeyPattern != "" {
-		entity.PartitionKeyParsed = parsePattern(entity.PartitionKeyPattern, fieldTypes)
-	}
-	if entity.SortKeyPattern != "" {
-		entity.SortKeyParsed = parsePattern(entity.SortKeyPattern, fieldTypes)
 	}
 }
 

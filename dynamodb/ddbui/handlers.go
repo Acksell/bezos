@@ -9,21 +9,21 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore"
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
 // APIHandler provides REST API endpoints for DynamoDB operations.
 type APIHandler struct {
-	store  *ddbstore.Store
+	client ddbiface.AWSDynamoClientV2
 	schema *LoadedSchema
 }
 
 // NewAPIHandler creates a new API handler.
-func NewAPIHandler(store *ddbstore.Store, schema *LoadedSchema) *APIHandler {
+func NewAPIHandler(client ddbiface.AWSDynamoClientV2, schema *LoadedSchema) *APIHandler {
 	return &APIHandler{
-		store:  store,
+		client: client,
 		schema: schema,
 	}
 }
@@ -46,13 +46,13 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 // listTables returns all available tables and their schemas.
 func (h *APIHandler) listTables(w http.ResponseWriter, r *http.Request) {
 	tables := make([]map[string]any, 0, len(h.schema.Tables))
-	for name, sf := range h.schema.Tables {
+	for name, t := range h.schema.Tables {
 		tables = append(tables, map[string]any{
 			"name":         name,
-			"partitionKey": sf.Table.PartitionKey,
-			"sortKey":      sf.Table.SortKey,
-			"gsiCount":     len(sf.Table.GSIs),
-			"entityCount":  len(sf.Entities),
+			"partitionKey": t.PartitionKey,
+			"sortKey":      t.SortKey,
+			"gsiCount":     len(t.GSIs),
+			"entityCount":  len(t.Entities),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tables": tables})
@@ -61,12 +61,13 @@ func (h *APIHandler) listTables(w http.ResponseWriter, r *http.Request) {
 // getTable returns full schema for a specific table.
 func (h *APIHandler) getTable(w http.ResponseWriter, r *http.Request) {
 	tableName := r.PathValue("table")
-	sf, ok := h.schema.Tables[tableName]
+	t, ok := h.schema.Tables[tableName]
 	if !ok {
 		writeError(w, http.StatusNotFound, "table not found: "+tableName)
 		return
 	}
-	writeJSON(w, http.StatusOK, sf)
+	// Return enriched table info including parsed patterns
+	writeJSON(w, http.StatusOK, t)
 }
 
 // scanItems returns all items in a table with pagination.
@@ -94,7 +95,7 @@ func (h *APIHandler) scanItems(w http.ResponseWriter, r *http.Request) {
 		input.ExclusiveStartKey = lastKey
 	}
 
-	output, err := h.store.Scan(r.Context(), input)
+	output, err := h.client.Scan(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "scan failed: "+err.Error())
 		return
@@ -129,19 +130,19 @@ func (h *APIHandler) getItemWithSK(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) doGetItem(w http.ResponseWriter, r *http.Request, tableName, pk, sk string) {
-	sf, ok := h.schema.Tables[tableName]
+	t, ok := h.schema.Tables[tableName]
 	if !ok {
 		writeError(w, http.StatusNotFound, "table not found: "+tableName)
 		return
 	}
 
-	key := buildKey(sf, pk, sk)
+	key := buildKey(t, pk, sk)
 	input := &dynamodb.GetItemInput{
 		TableName: &tableName,
 		Key:       key,
 	}
 
-	output, err := h.store.GetItem(r.Context(), input)
+	output, err := h.client.GetItem(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "get item failed: "+err.Error())
 		return
@@ -171,19 +172,19 @@ func (h *APIHandler) deleteItemWithSK(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) doDeleteItem(w http.ResponseWriter, r *http.Request, tableName, pk, sk string) {
-	sf, ok := h.schema.Tables[tableName]
+	t, ok := h.schema.Tables[tableName]
 	if !ok {
 		writeError(w, http.StatusNotFound, "table not found: "+tableName)
 		return
 	}
 
-	key := buildKey(sf, pk, sk)
+	key := buildKey(t, pk, sk)
 	input := &dynamodb.DeleteItemInput{
 		TableName: &tableName,
 		Key:       key,
 	}
 
-	_, err := h.store.DeleteItem(r.Context(), input)
+	_, err := h.client.DeleteItem(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "delete item failed: "+err.Error())
 		return
@@ -206,7 +207,7 @@ type BulkDeleteKey struct {
 // bulkDeleteItems deletes multiple items in a single request.
 func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
 	tableName := r.PathValue("table")
-	sf, ok := h.schema.Tables[tableName]
+	t, ok := h.schema.Tables[tableName]
 	if !ok {
 		writeError(w, http.StatusNotFound, "table not found: "+tableName)
 		return
@@ -231,7 +232,7 @@ func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
 	// Build batch write request
 	writeRequests := make([]types.WriteRequest, len(req.Keys))
 	for i, k := range req.Keys {
-		key := buildKey(sf, k.PK, k.SK)
+		key := buildKey(t, k.PK, k.SK)
 		writeRequests[i] = types.WriteRequest{
 			DeleteRequest: &types.DeleteRequest{
 				Key: key,
@@ -245,7 +246,7 @@ func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err := h.store.BatchWriteItem(r.Context(), input)
+	_, err := h.client.BatchWriteItem(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "bulk delete failed: "+err.Error())
 		return
@@ -281,7 +282,7 @@ func (h *APIHandler) putItem(w http.ResponseWriter, r *http.Request) {
 		Item:      item,
 	}
 
-	_, err := h.store.PutItem(r.Context(), input)
+	_, err := h.client.PutItem(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "put item failed: "+err.Error())
 		return
@@ -292,13 +293,13 @@ func (h *APIHandler) putItem(w http.ResponseWriter, r *http.Request) {
 
 // QueryRequest is the JSON request body for querying items.
 type QueryRequest struct {
-	KeyConditionExpression    string         `json:"keyConditionExpression"`
-	FilterExpression          string         `json:"filterExpression,omitempty"`
+	KeyConditionExpression    string            `json:"keyConditionExpression"`
+	FilterExpression          string            `json:"filterExpression,omitempty"`
 	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames,omitempty"`
 	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues,omitempty"`
-	Limit                     int            `json:"limit,omitempty"`
-	ScanIndexForward          *bool          `json:"scanIndexForward,omitempty"`
-	LastKey                   string         `json:"lastKey,omitempty"`
+	Limit                     int               `json:"limit,omitempty"`
+	ScanIndexForward          *bool             `json:"scanIndexForward,omitempty"`
+	LastKey                   string            `json:"lastKey,omitempty"`
 }
 
 // queryItems queries the primary index.
@@ -365,7 +366,7 @@ func (h *APIHandler) doQuery(w http.ResponseWriter, r *http.Request, tableName s
 		input.ExclusiveStartKey = lastKey
 	}
 
-	output, err := h.store.Query(context.Background(), input)
+	output, err := h.client.Query(context.Background(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query failed: "+err.Error())
 		return
@@ -413,11 +414,11 @@ func int32Ptr(v int32) *int32 {
 }
 
 // buildKey creates a DynamoDB key from partition key and optional sort key.
-func buildKey(sf *SchemaFile, pk, sk string) map[string]types.AttributeValue {
+func buildKey(t *EnrichedTable, pk, sk string) map[string]types.AttributeValue {
 	key := make(map[string]types.AttributeValue)
-	key[sf.Table.PartitionKey.Name] = &types.AttributeValueMemberS{Value: pk}
-	if sk != "" && sf.Table.SortKey != nil {
-		key[sf.Table.SortKey.Name] = &types.AttributeValueMemberS{Value: sk}
+	key[t.PartitionKey.Name] = &types.AttributeValueMemberS{Value: pk}
+	if sk != "" && t.SortKey != nil {
+		key[t.SortKey.Name] = &types.AttributeValueMemberS{Value: sk}
 	}
 	return key
 }
@@ -569,21 +570,21 @@ func decodeLastKey(encoded string) (map[string]types.AttributeValue, error) {
 
 // DetectEntityType attempts to match an item's key patterns to known entities.
 func (h *APIHandler) DetectEntityType(tableName string, item map[string]any) string {
-	sf, ok := h.schema.Tables[tableName]
+	t, ok := h.schema.Tables[tableName]
 	if !ok {
 		return ""
 	}
 
-	pkName := sf.Table.PartitionKey.Name
+	pkName := t.PartitionKey.Name
 	skName := ""
-	if sf.Table.SortKey != nil {
-		skName = sf.Table.SortKey.Name
+	if t.SortKey != nil {
+		skName = t.SortKey.Name
 	}
 
 	pk, _ := item[pkName].(string)
 	sk, _ := item[skName].(string)
 
-	for _, entity := range sf.Entities {
+	for _, entity := range t.EnrichedEntities {
 		if matchesPattern(pk, entity.PartitionKeyPattern) {
 			if skName == "" || matchesPattern(sk, entity.SortKeyPattern) {
 				return entity.Type

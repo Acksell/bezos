@@ -12,77 +12,70 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/acksell/bezos/dynamodb/ddbstore"
+	"github.com/acksell/bezos/dynamodb/ddbiface"
+	"github.com/acksell/bezos/dynamodb/schema"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
 
-// ServerConfig configures the debug UI server.
-type ServerConfig struct {
-	// Port is the HTTP port to listen on.
-	Port int
-	// DBPath is the path to the BadgerDB database. Empty for in-memory mode.
-	DBPath string
-	// SchemaFiles is the list of schema YAML file paths.
-	SchemaFiles []string
-}
-
 // Server is the debug UI HTTP server.
 type Server struct {
-	config     ServerConfig
-	store      *ddbstore.Store
+	port       int
+	client     ddbiface.AWSDynamoClientV2
 	schema     *LoadedSchema
 	httpServer *http.Server
 }
 
 // NewServer creates a new debug UI server.
-func NewServer(config ServerConfig) (*Server, error) {
-	// Load schemas
-	schema, err := LoadSchemas(config.SchemaFiles)
+// The client must implement the AWSDynamoClientV2 interface (e.g., *ddbstore.Store
+// or the AWS SDK v2 *dynamodb.Client).
+// Multiple schemas can be passed and will be merged.
+func NewServer(client ddbiface.AWSDynamoClientV2, port int, schemas ...schema.Schema) (*Server, error) {
+	if len(schemas) == 0 {
+		return nil, fmt.Errorf("at least one schema is required")
+	}
+
+	loaded, err := LoadFromSchema(schemas...)
 	if err != nil {
 		return nil, fmt.Errorf("loading schemas: %w", err)
 	}
 
-	// Create store
-	store, err := ddbstore.New(
-		ddbstore.StoreOptions{
-			Path:     config.DBPath,
-			InMemory: config.DBPath == "",
-		},
-		schema.TableDefinitions...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("creating store: %w", err)
-	}
-
 	return &Server{
-		config: config,
-		store:  store,
-		schema: schema,
+		port:   port,
+		client: client,
+		schema: loaded,
 	}, nil
 }
 
-// Run starts the server and blocks until shutdown.
-func (s *Server) Run() error {
+// Handler returns an http.Handler for the debug UI.
+// This can be used to mount the UI on an existing HTTP server.
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Register API handlers
-	apiHandler := NewAPIHandler(s.store, s.schema)
+	apiHandler := NewAPIHandler(s.client, s.schema)
 	apiHandler.RegisterRoutes(mux)
 
 	// Serve static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
-		return fmt.Errorf("creating static fs: %w", err)
+		// This should never happen with embedded files
+		panic(fmt.Sprintf("creating static fs: %v", err))
 	}
 	fileServer := http.FileServer(http.FS(staticFS))
 	mux.Handle("GET /", fileServer)
 
+	return corsMiddleware(loggingMiddleware(mux))
+}
+
+// Run starts the server and blocks until shutdown.
+// The caller is responsible for closing the client after Run returns.
+func (s *Server) Run() error {
 	// Create HTTP server
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.config.Port),
-		Handler:      corsMiddleware(loggingMiddleware(mux)),
+		Addr:         fmt.Sprintf(":%d", s.port),
+		Handler:      s.Handler(),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -99,7 +92,6 @@ func (s *Server) Run() error {
 		defer cancel()
 
 		s.httpServer.Shutdown(ctx)
-		s.store.Close()
 		close(done)
 	}()
 
@@ -115,15 +107,11 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// Shutdown gracefully shuts down the server.
+// Shutdown gracefully shuts down the HTTP server.
+// This does NOT close the underlying client - the caller is responsible for that.
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.httpServer != nil {
-		if err := s.httpServer.Shutdown(ctx); err != nil {
-			return err
-		}
-	}
-	if s.store != nil {
-		return s.store.Close()
+		return s.httpServer.Shutdown(ctx)
 	}
 	return nil
 }
@@ -133,17 +121,12 @@ func (s *Server) printBanner() {
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
 	fmt.Println("║                    DynamoDB Debug UI                         ║")
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
-	fmt.Printf("║  URL: http://localhost:%-40d║\n", s.config.Port)
-	if s.config.DBPath == "" {
-		fmt.Println("║  Mode: In-memory (data will be lost on exit)                 ║")
-	} else {
-		fmt.Printf("║  Database: %-51s║\n", truncate(s.config.DBPath, 51))
-	}
+	fmt.Printf("║  URL: http://localhost:%-40d║\n", s.port)
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Println("║  Tables:                                                     ║")
-	for name, sf := range s.schema.Tables {
-		gsiCount := len(sf.Table.GSIs)
-		entityCount := len(sf.Entities)
+	for name, t := range s.schema.Tables {
+		gsiCount := len(t.GSIs)
+		entityCount := len(t.Entities)
 		line := fmt.Sprintf("    - %s (%d GSIs, %d entities)", name, gsiCount, entityCount)
 		fmt.Printf("║  %-60s║\n", truncate(line, 60))
 	}

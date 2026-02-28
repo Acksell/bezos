@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/acksell/bezos/dynamodb/ddbgen"
 )
@@ -12,10 +13,9 @@ func runGen() error {
 	fs := flag.NewFlagSet("gen", flag.ExitOnError)
 
 	var (
-		dir       = fs.String("dir", ".", "directory to scan for index definitions")
-		output    = fs.String("output", "index_gen.go", "output file path for generated Go code")
-		noYAML    = fs.Bool("no-yaml", false, "disable schema YAML file generation")
-		schemaDir = fs.String("schema-dir", "", "directory for schema YAML files (default: same as source)")
+		dir      = fs.String("dir", ".", "directory to scan for index definitions")
+		output   = fs.String("output", "index_gen.go", "output file path for generated Go code")
+		noSchema = fs.Bool("no-schema", false, "disable schema/ subdirectory generation")
 	)
 
 	fs.Usage = func() {
@@ -29,27 +29,24 @@ Flags:`)
 		fmt.Println(`
 Examples:
   ddb gen                           # Generate code and schema files
-  ddb gen --no-yaml                 # Generate code only
+  ddb gen --no-schema               # Generate code only (no schema/ subdirectory)
   ddb gen --dir ./entities          # Scan specific directory
-  ddb gen --schema-dir ./schemas    # Output schemas to specific directory
 
 Typical usage with go:generate:
   //go:generate ddb gen
-  //go:generate ddb gen --schema-dir ../../schemas
 
 The generator scans for index.PrimaryIndex definitions and produces:
   - index_gen.go: Type-safe key constructors
-  - schema_*.yaml: Table/entity schema files (unless --no-yaml)`)
+  - schema/schema_dynamodb.yaml: Table/entity schema in YAML format
+  - schema/schema_gen.go: Go loader that embeds the YAML and exports Schema variable
+
+The schema/ package can be imported to pass to ddbui.NewServer:
+  import "myapp/entities/schema"
+  server, _ := ddbui.NewServer(store, 3070, schema.Schema)`)
 	}
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
-	}
-
-	// Determine schema output directory
-	schemaOutputDir := *dir
-	if *schemaDir != "" {
-		schemaOutputDir = *schemaDir
 	}
 
 	// Discover indexes
@@ -80,31 +77,36 @@ The generator scans for index.PrimaryIndex definitions and produces:
 
 	fmt.Printf("ddb gen: generated %s (%d indexes)\n", outputPath, len(result.Indexes))
 
-	// Generate schema file unless disabled
-	if !*noYAML {
+	// Generate schema/ subdirectory with YAML and Go loader
+	if !*noSchema {
 		schemas, err := ddbgen.GenerateSchemas(result)
 		if err != nil {
 			return fmt.Errorf("generating schemas: %w", err)
 		}
 
-		// Ensure schema directory exists
-		if schemaOutputDir != "" && schemaOutputDir != "." {
-			if err := os.MkdirAll(schemaOutputDir, 0755); err != nil {
-				return fmt.Errorf("creating schema directory: %w", err)
-			}
+		schemaDir := filepath.Join(*dir, "schema")
+		if err := os.MkdirAll(schemaDir, 0755); err != nil {
+			return fmt.Errorf("creating schema directory: %w", err)
 		}
 
-		if err := ddbgen.WriteSchemas(schemas, schemaOutputDir); err != nil {
+		// Write YAML schema file
+		if err := ddbgen.WriteSchemas(schemas, schemaDir); err != nil {
 			return fmt.Errorf("writing schema file: %w", err)
 		}
+		fmt.Printf("ddb gen: generated %s (%d tables)\n", filepath.Join(schemaDir, "schema_dynamodb.yaml"), len(schemas.Tables))
 
-		schemaPath := schemaOutputDir
-		if schemaPath == "" || schemaPath == "." {
-			schemaPath = "schema_dynamodb.yaml"
-		} else {
-			schemaPath = schemaPath + "/schema_dynamodb.yaml"
+		// Write Go loader file
+		schemaGoCode, err := ddbgen.GenerateSchemaGo()
+		if err != nil {
+			return fmt.Errorf("generating schema go code: %w", err)
 		}
-		fmt.Printf("ddb gen: generated %s (%d tables)\n", schemaPath, len(schemas))
+
+		schemaGoPath := filepath.Join(schemaDir, "schema_gen.go")
+		if err := os.WriteFile(schemaGoPath, schemaGoCode, 0644); err != nil {
+			return fmt.Errorf("writing schema go file: %w", err)
+		}
+
+		fmt.Printf("ddb gen: generated %s\n", schemaGoPath)
 	}
 
 	return nil
