@@ -25,8 +25,14 @@ const (
 //   - "{timestamp:unix}"             → time.Time with Unix seconds format
 //   - "{timestamp:unixnano:%020d}"   → time.Time with padding
 //   - "{count:%08d}"                 → integer with printf padding
+//   - "{ts:utc:rfc3339}"             → time.Time converted to UTC then formatted
+//   - "{ts:utc:unixnano:%020d}"      → chained modifiers: UTC + unixnano + padding
 //
-// Supported time formats: unix, unixmilli, unixnano, rfc3339, rfc3339fixed, or custom Go layout.
+// Supported time formats: unix, unixmilli, unixnano, rfc3339, rfc3339fixed, rfc3339nano,
+// or any custom Go time layout string.
+//
+// Supported modifiers:
+//   - utc: Converts time.Time to UTC before formatting (recommended for sort keys)
 type FmtSpec struct {
 	Raw   string     // Original pattern string
 	Kind  SpecKind   // DynamoDB attribute type (S, N, B)
@@ -36,10 +42,30 @@ type FmtSpec struct {
 // SpecPart represents a single part of a format pattern - either a literal string
 // or a field reference with optional format annotations.
 type SpecPart struct {
-	IsLiteral  bool   // true if this is a literal string, false if field reference
-	Value      string // the literal value or field path (e.g., "user.id")
-	Format     string // format annotation (e.g., "unix", "rfc3339") - only for field refs
-	PrintfSpec string // printf format spec (e.g., "%020d") - only for field refs
+	IsLiteral  bool     // true if this is a literal string, false if field reference
+	Value      string   // the literal value or field path (e.g., "user.id")
+	Formats    []string // format modifiers in order (e.g., ["utc", "rfc3339"] or ["unixnano"])
+	PrintfSpec string   // printf format spec (e.g., "%020d") - only for field refs
+}
+
+// Format returns the primary format (last non-printf modifier), for backwards compatibility.
+// For "{ts:utc:rfc3339}" returns "rfc3339". For "{ts:utc:unixnano}" returns "unixnano".
+func (p SpecPart) Format() string {
+	if len(p.Formats) == 0 {
+		return ""
+	}
+	return p.Formats[len(p.Formats)-1]
+}
+
+// HasModifier returns true if the given modifier is in the format chain.
+// E.g., for "{ts:utc:rfc3339}", HasModifier("utc") returns true.
+func (p SpecPart) HasModifier(mod string) bool {
+	for _, f := range p.Formats {
+		if f == mod {
+			return true
+		}
+	}
+	return false
 }
 
 // fieldRefRegex matches {fieldName} or {nested.field.path} patterns (including empty braces for validation)
@@ -79,26 +105,33 @@ func FromField(fieldPath string) ValDef {
 	return ValDef{FromField: fieldPath}
 }
 
-// parseFieldRef parses a field reference string like "field", "field:format", or "field:format:%spec"
-// todo does not support e.g:
-// .  val.Fmt("event#{ts:unixnxano:%020d}")
-func parseFieldRef(ref string) (fieldPath, format, printfSpec string) {
-	parts := strings.SplitN(ref, ":", 2)
+// parseFieldRef parses a field reference string like "field", "field:format", "field:format:%spec",
+// or "field:mod1:mod2:format" for chained modifiers.
+//
+// Examples:
+//   - "ts" → fieldPath="ts", formats=[], printfSpec=""
+//   - "ts:unix" → fieldPath="ts", formats=["unix"], printfSpec=""
+//   - "ts:unixnano:%020d" → fieldPath="ts", formats=["unixnano"], printfSpec="%020d"
+//   - "ts:utc:rfc3339" → fieldPath="ts", formats=["utc", "rfc3339"], printfSpec=""
+//   - "ts:utc:unixnano:%020d" → fieldPath="ts", formats=["utc", "unixnano"], printfSpec="%020d"
+func parseFieldRef(ref string) (fieldPath string, formats []string, printfSpec string) {
+	parts := strings.Split(ref, ":")
 	fieldPath = parts[0]
 
-	if len(parts) > 1 {
-		formatPart := parts[1]
-		// Check if there's a printf spec (starts with %)
-		if idx := strings.Index(formatPart, ":%"); idx >= 0 {
-			format = formatPart[:idx]
-			printfSpec = formatPart[idx+1:]
-		} else if strings.HasPrefix(formatPart, "%") {
-			// Just a printf spec, no named format
-			printfSpec = formatPart
-		} else {
-			format = formatPart
-		}
+	if len(parts) == 1 {
+		return
 	}
+
+	// Check if the last part is a printf spec (starts with %)
+	// todo why only last part?
+	lastPart := parts[len(parts)-1]
+	if strings.HasPrefix(lastPart, "%") {
+		printfSpec = lastPart
+		formats = parts[1 : len(parts)-1]
+	} else {
+		formats = parts[1:]
+	}
+
 	return
 }
 
@@ -138,7 +171,7 @@ func parseFmtSpec(raw string, kind SpecKind) (FmtSpec, error) {
 			return FmtSpec{}, fmt.Errorf("empty field reference at position %d", start)
 		}
 
-		fieldPath, format, printfSpec := parseFieldRef(fullRef)
+		fieldPath, formats, printfSpec := parseFieldRef(fullRef)
 
 		// Validate field path components
 		pathParts := strings.Split(fieldPath, ".")
@@ -151,7 +184,7 @@ func parseFmtSpec(raw string, kind SpecKind) (FmtSpec, error) {
 		s.Parts = append(s.Parts, SpecPart{
 			IsLiteral:  false,
 			Value:      fieldPath,
-			Format:     format,
+			Formats:    formats,
 			PrintfSpec: printfSpec,
 		})
 
@@ -231,6 +264,7 @@ func (p SpecPart) ParamName() string {
 	return parts[len(parts)-1]
 }
 
+// todo why?
 // =============================================================================
 // Type checking helpers
 // =============================================================================
@@ -277,6 +311,7 @@ func HasPadding(spec string) bool {
 	return strings.HasPrefix(spec, "%0") && len(spec) > 2
 }
 
+// todo should not be part of this package
 // =============================================================================
 // Code generation helpers
 // =============================================================================
@@ -299,6 +334,7 @@ var TimeFormatLayouts = map[string]string{
 // fieldExpr is the Go expression for the field (e.g., "paramName" or "e.FieldName").
 // fieldType is the Go type of the field (e.g., "int64", "time.Time").
 // Returns error if the type/format combination is invalid.
+// todo fix this AI slop.
 func (p SpecPart) GenerateConversionExpr(fieldExpr string, fieldType string) (ConversionResult, error) {
 	// String type - use directly (with optional format annotation for padding)
 	if fieldType == "string" {
@@ -342,13 +378,14 @@ func (p SpecPart) GenerateConversionExpr(fieldExpr string, fieldType string) (Co
 
 	// Float types - require explicit format
 	if IsFloatType(fieldType) {
-		if p.PrintfSpec == "" && p.Format == "" {
+		format := p.Format()
+		if p.PrintfSpec == "" && format == "" {
 			return ConversionResult{}, fmt.Errorf("float type %s requires explicit format (e.g., {field:%%.2f} or {field:%%020.2f})", fieldType)
 		}
 
 		spec := p.PrintfSpec
 		if spec == "" {
-			spec = p.Format // Allow format to be used as spec for floats
+			spec = format // Allow format to be used as spec for floats
 		}
 
 		return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s)", spec, fieldExpr)}, nil
@@ -356,59 +393,70 @@ func (p SpecPart) GenerateConversionExpr(fieldExpr string, fieldType string) (Co
 
 	// time.Time - require explicit format
 	if IsTimeType(fieldType) {
-		if p.Format == "" {
+		format := p.Format()
+		if format == "" {
 			return ConversionResult{}, fmt.Errorf("time.Time field requires explicit format (e.g., {field:unix}, {field:unixmilli}, {field:unixnano}, {field:rfc3339}, {field:rfc3339fixed}, or {field:2006-01-02})")
 		}
 
-		switch p.Format {
+		// Apply UTC modifier if present
+		timeExpr := fieldExpr
+		if p.HasModifier("utc") {
+			timeExpr = fmt.Sprintf("%s.UTC()", fieldExpr)
+		}
+
+		switch format {
 		case "unix":
 			if p.PrintfSpec != "" {
-				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.Unix())", p.PrintfSpec, fieldExpr)}, nil
+				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.Unix())", p.PrintfSpec, timeExpr)}, nil
 			}
 			return ConversionResult{
-				Expr:        fmt.Sprintf("strconv.FormatInt(%s.Unix(), 10)", fieldExpr),
+				Expr:        fmt.Sprintf("strconv.FormatInt(%s.Unix(), 10)", timeExpr),
 				UsesStrconv: true,
 			}, nil
 
 		case "unixmilli":
 			if p.PrintfSpec != "" {
-				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.UnixMilli())", p.PrintfSpec, fieldExpr)}, nil
+				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.UnixMilli())", p.PrintfSpec, timeExpr)}, nil
 			}
 			return ConversionResult{
-				Expr:        fmt.Sprintf("strconv.FormatInt(%s.UnixMilli(), 10)", fieldExpr),
+				Expr:        fmt.Sprintf("strconv.FormatInt(%s.UnixMilli(), 10)", timeExpr),
 				UsesStrconv: true,
 			}, nil
 
 		case "unixnano":
 			if p.PrintfSpec != "" {
-				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.UnixNano())", p.PrintfSpec, fieldExpr)}, nil
+				return ConversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s.UnixNano())", p.PrintfSpec, timeExpr)}, nil
 			}
 			return ConversionResult{
-				Expr:        fmt.Sprintf("strconv.FormatInt(%s.UnixNano(), 10)", fieldExpr),
+				Expr:        fmt.Sprintf("strconv.FormatInt(%s.UnixNano(), 10)", timeExpr),
 				UsesStrconv: true,
 			}, nil
 
 		case "rfc3339":
 			return ConversionResult{
-				Expr:     fmt.Sprintf("%s.Format(time.RFC3339)", fieldExpr),
+				Expr:     fmt.Sprintf("%s.Format(time.RFC3339)", timeExpr),
 				UsesTime: true,
 			}, nil
 
 		case "rfc3339fixed":
 			return ConversionResult{
-				Expr: fmt.Sprintf("%s.Format(%s)", fieldExpr, TimeFormatLayouts["rfc3339fixed"]),
+				Expr: fmt.Sprintf("%s.Format(%s)", timeExpr, TimeFormatLayouts["rfc3339fixed"]),
 			}, nil
 
 		case "rfc3339nano":
 			return ConversionResult{
-				Expr:     fmt.Sprintf("%s.Format(time.RFC3339Nano)", fieldExpr),
+				Expr:     fmt.Sprintf("%s.Format(time.RFC3339Nano)", timeExpr),
 				UsesTime: true,
 			}, nil
+
+		case "utc":
+			// "utc" alone is not a valid format - it's a modifier
+			return ConversionResult{}, fmt.Errorf("time.Time field with :utc modifier requires a format (e.g., {field:utc:rfc3339} or {field:utc:unixnano})")
 
 		default:
 			// Custom time format layout
 			return ConversionResult{
-				Expr: fmt.Sprintf("%s.Format(%q)", fieldExpr, p.Format),
+				Expr: fmt.Sprintf("%s.Format(%q)", timeExpr, format),
 			}, nil
 		}
 	}
@@ -424,20 +472,21 @@ func (p SpecPart) SortKeyWarning(fieldType string, entityType string) string {
 		return fmt.Sprintf("warning: %s sort key uses %s without padding format.\n"+
 			"  String comparison treats \"9\" > \"10\". For correct ordering either:\n"+
 			"  - Use DynamoDB Number type for the sort key\n"+
-			"  - Add padding: {field:%%020d}\n", entityType, fieldType)
+			"  - Add zero-padding: {field:%%020d}\n", entityType, fieldType)
 	}
 
 	if IsFloatType(fieldType) && !HasPadding(p.PrintfSpec) {
 		spec := p.PrintfSpec
 		if spec == "" {
-			spec = p.Format
+			spec = p.Format()
 		}
 		return fmt.Sprintf("warning: %s sort key uses %s format %q without total width padding.\n"+
 			"  For correct string sorting, specify total width: {field:%%020.2f}\n", entityType, fieldType, spec)
 	}
 
+	format := p.Format()
 	if IsTimeType(fieldType) {
-		switch p.Format {
+		switch format {
 		case "unix":
 			if !HasPadding(p.PrintfSpec) {
 				return fmt.Sprintf("warning: %s sort key uses \"unix\" timestamp without padding.\n"+
@@ -458,16 +507,27 @@ func (p SpecPart) SortKeyWarning(fieldType string, entityType string) string {
 			}
 		case "rfc3339":
 			return fmt.Sprintf("warning: %s sort key uses \"rfc3339\" time format.\n"+
-				"  RFC3339 has variable length and timezone-dependent sorting.\n"+
+				"  RFC3339 has variable-width timezone offsets (+00:00 vs Z vs +05:30), making\n"+
+				"  string comparison unreliable for ordering across timezones.\n"+
 				"  For correct string ordering, prefer:\n"+
-				"  - unix, unixmilli, or unixnano with padding (numeric, always sortable)\n"+
-				"  - rfc3339fixed (constant length: \"2006-01-02T15:04:05.000000000Z07:00\")\n", entityType)
+				"  - unix, unixmilli, or unixnano with padding (numeric, timezone-independent)\n"+
+				"  - {field:utc:rfc3339fixed} to normalize to UTC with constant length\n", entityType)
+		case "rfc3339fixed":
+			// rfc3339fixed is okay if using UTC, warn if not
+			if !p.HasModifier("utc") {
+				return fmt.Sprintf("warning: %s sort key uses \"rfc3339fixed\" without :utc modifier.\n"+
+					"  While rfc3339fixed has constant length, different timezone offsets still\n"+
+					"  cause incorrect string ordering (e.g., \"...+05:00\" > \"...Z\").\n"+
+					"  For correct ordering, either:\n"+
+					"  - Use {field:utc:rfc3339fixed} to normalize to UTC\n"+
+					"  - Use unix/unixmilli/unixnano with padding (timezone-independent)\n", entityType)
+			}
 		case "rfc3339nano":
 			return fmt.Sprintf("warning: %s sort key uses \"rfc3339nano\" time format.\n"+
-				"  RFC3339Nano has variable length due to trailing zeros.\n"+
+				"  RFC3339Nano has variable length (trailing zeros stripped) and timezone issues.\n"+
 				"  For correct string ordering, prefer:\n"+
 				"  - unix, unixmilli, or unixnano with padding\n"+
-				"  - rfc3339fixed (constant length)\n", entityType)
+				"  - {field:utc:rfc3339fixed} (constant length, UTC-normalized)\n", entityType)
 		}
 	}
 

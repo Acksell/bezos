@@ -189,3 +189,54 @@ func TestConstantConstructors(t *testing.T) {
 		}
 	})
 }
+
+func TestFmtSpec_ChainedModifiers(t *testing.T) {
+	tests := []struct {
+		name       string
+		pattern    string
+		wantFmt    string // expected Format() return
+		wantHasUTC bool
+	}{
+		{"single format", "{ts:rfc3339}", "rfc3339", false},
+		{"utc modifier", "{ts:utc:rfc3339}", "rfc3339", true},
+		{"utc with custom format", "{ts:utc:2006-01-02}", "2006-01-02", true},
+		{"utc with unixnano", "{ts:utc:unixnano:%020d}", "unixnano", true},
+		{"no format", "{ts}", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := val.Fmt(tt.pattern)
+			refs := v.Format.FieldRefs()
+			if len(refs) != 1 {
+				t.Fatalf("FieldRefs() len = %d, want 1", len(refs))
+			}
+			ref := refs[0]
+			if got := ref.Format(); got != tt.wantFmt {
+				t.Errorf("Format() = %q, want %q", got, tt.wantFmt)
+			}
+			if got := ref.HasModifier("utc"); got != tt.wantHasUTC {
+				t.Errorf("HasModifier(utc) = %v, want %v", got, tt.wantHasUTC)
+			}
+		})
+	}
+}
+
+func TestFmtSpec_String_Roundtrip(t *testing.T) {
+	// Test that patterns with chained modifiers round-trip correctly
+	patterns := []string{
+		"USER#{id}",
+		"MSG#{ts:unix}",
+		"MSG#{ts:utc:rfc3339}",
+		"ORDER#{tenant}#{ts:utc:unixnano:%020d}",
+	}
+
+	for _, pattern := range patterns {
+		t.Run(pattern, func(t *testing.T) {
+			v := val.Fmt(pattern)
+			if got := v.Format.String(); got != pattern {
+				t.Errorf("String() = %q, want %q", got, pattern)
+			}
+		})
+	}
+}
