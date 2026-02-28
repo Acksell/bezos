@@ -7,6 +7,8 @@ import (
 	"github.com/acksell/bezos/dynamodb/ddbsdk"
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/table"
+	"strconv"
+	"time"
 )
 
 // =============================================================================
@@ -26,7 +28,7 @@ func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("USER#%s", id),
+			PartitionKey: "USER#" + id,
 			SortKey:      "PROFILE",
 		},
 	}
@@ -37,7 +39,7 @@ func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("USER#%s", e.UserID),
+			PartitionKey: "USER#" + e.UserID,
 			SortKey:      "PROFILE",
 		},
 	}
@@ -49,8 +51,8 @@ func (idx UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
 		{
 			Definition: idx.Secondary[0].KeyDefinition(),
 			Values: table.PrimaryKeyValues{
-				PartitionKey: fmt.Sprintf("EMAIL#%s", e.Email),
-				SortKey:      fmt.Sprintf("USER#%s", e.UserID),
+				PartitionKey: "EMAIL#" + e.Email,
+				SortKey:      "USER#" + e.UserID,
 			},
 		},
 	}
@@ -81,8 +83,8 @@ func (idx UserIndexUtil) GSI1Key(email string, id string) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("EMAIL#%s", email),
-			SortKey:      fmt.Sprintf("USER#%s", id),
+			PartitionKey: "EMAIL#" + email,
+			SortKey:      "USER#" + id,
 		},
 	}
 }
@@ -104,7 +106,7 @@ func (q UserPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 func (idx UserIndexUtil) QueryPartition(id string) UserPrimaryQuery {
 	return UserPrimaryQuery{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, fmt.Sprintf("USER#%s", id)),
+		qd:  ddbsdk.QueryPartition(idx.Table, "USER#"+id),
 	}
 }
 
@@ -133,13 +135,13 @@ func (q UserGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
 func (idx UserIndexGSI1Util) QueryPartition(email string) UserGSI1Query {
 	return UserGSI1Query{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.primary.Table, fmt.Sprintf("EMAIL#%s", email)).OnIndex("GSI1"),
+		qd:  ddbsdk.QueryPartition(idx.primary.Table, "EMAIL#"+email).OnIndex("GSI1"),
 	}
 }
 
 // IdEquals adds a sort key equals condition and returns the final QueryDef.
 func (q UserGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("USER#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.Equals("USER#" + id))
 }
 
 // IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
@@ -149,27 +151,27 @@ func (q UserGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
 
 // IdBetween adds a sort key between condition and returns the final QueryDef.
 func (q UserGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("USER#%s", idStart), fmt.Sprintf("USER#%s", idEnd)))
+	return q.qd.WithSKCondition(ddbsdk.Between("USER#"+idStart, "USER#"+idEnd))
 }
 
 // IdGreaterThan adds a sort key > condition and returns the final QueryDef.
 func (q UserGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("USER#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("USER#" + id))
 }
 
 // IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
 func (q UserGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("USER#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("USER#" + id))
 }
 
 // IdLessThan adds a sort key < condition and returns the final QueryDef.
 func (q UserGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("USER#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.LessThan("USER#" + id))
 }
 
 // IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
 func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("USER#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("USER#" + id))
 }
 
 // =============================================================================
@@ -189,8 +191,8 @@ func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.Prim
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("TENANT#%s", tenantID),
-			SortKey:      fmt.Sprintf("ORDER#%s", orderID),
+			PartitionKey: "TENANT#" + tenantID,
+			SortKey:      "ORDER#" + orderID,
 		},
 	}
 }
@@ -200,8 +202,8 @@ func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 	return table.PrimaryKey{
 		Definition: idx.Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
-			PartitionKey: fmt.Sprintf("TENANT#%s", e.TenantID),
-			SortKey:      fmt.Sprintf("ORDER#%s", e.OrderID),
+			PartitionKey: "TENANT#" + e.TenantID,
+			SortKey:      "ORDER#" + e.OrderID,
 		},
 	}
 }
@@ -238,13 +240,13 @@ func (q OrderPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 func (idx OrderIndexUtil) QueryPartition(tenantID string) OrderPrimaryQuery {
 	return OrderPrimaryQuery{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, fmt.Sprintf("TENANT#%s", tenantID)),
+		qd:  ddbsdk.QueryPartition(idx.Table, "TENANT#"+tenantID),
 	}
 }
 
 // OrderIDEquals adds a sort key equals condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDEquals(orderID string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("ORDER#%s", orderID)))
+	return q.qd.WithSKCondition(ddbsdk.Equals("ORDER#" + orderID))
 }
 
 // OrderIDBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
@@ -254,27 +256,237 @@ func (q OrderPrimaryQuery) OrderIDBeginsWith(prefix string) ddbsdk.QueryDef {
 
 // OrderIDBetween adds a sort key between condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDBetween(orderIDStart string, orderIDEnd string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("ORDER#%s", orderIDStart), fmt.Sprintf("ORDER#%s", orderIDEnd)))
+	return q.qd.WithSKCondition(ddbsdk.Between("ORDER#"+orderIDStart, "ORDER#"+orderIDEnd))
 }
 
 // OrderIDGreaterThan adds a sort key > condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDGreaterThan(orderID string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("ORDER#%s", orderID)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("ORDER#" + orderID))
 }
 
 // OrderIDGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDGreaterThanOrEqual(orderID string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("ORDER#%s", orderID)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("ORDER#" + orderID))
 }
 
 // OrderIDLessThan adds a sort key < condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDLessThan(orderID string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("ORDER#%s", orderID)))
+	return q.qd.WithSKCondition(ddbsdk.LessThan("ORDER#" + orderID))
 }
 
 // OrderIDLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
 func (q OrderPrimaryQuery) OrderIDLessThanOrEqual(orderID string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("ORDER#%s", orderID)))
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("ORDER#" + orderID))
+}
+
+// =============================================================================
+// Message Index Wrapper
+// =============================================================================
+
+// MessageIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type MessageIndexUtil struct {
+	*index.PrimaryIndex[Message]
+}
+
+// MessageIndex is the typed wrapper for Message operations.
+var MessageIndex = MessageIndexUtil{PrimaryIndex: &messageIndex}
+
+// PrimaryKey creates a primary key from explicit parameters.
+func (idx MessageIndexUtil) PrimaryKey(chatID string, sequenceNum int64) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "CHAT#" + chatID,
+			SortKey:      "MSG#" + strconv.FormatInt(sequenceNum, 10),
+		},
+	}
+}
+
+// PrimaryKeyFrom creates the primary key from a Message entity.
+func (idx MessageIndexUtil) PrimaryKeyFrom(e *Message) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "CHAT#" + e.ChatID,
+			SortKey:      "MSG#" + strconv.FormatInt(e.SequenceNum, 10),
+		},
+	}
+}
+
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx MessageIndexUtil) UnsafePut(e *Message) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+}
+
+// Delete creates a Delete operation.
+func (idx MessageIndexUtil) Delete(chatID string, sequenceNum int64) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(chatID, sequenceNum))
+}
+
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx MessageIndexUtil) UnsafeUpdate(chatID string, sequenceNum int64) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(chatID, sequenceNum))
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// MessagePrimaryQuery is a query builder for the primary index.
+type MessagePrimaryQuery struct {
+	idx *MessageIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q MessagePrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx MessageIndexUtil) QueryPartition(chatID string) MessagePrimaryQuery {
+	return MessagePrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, "CHAT#"+chatID),
+	}
+}
+
+// SequenceNumEquals adds a sort key equals condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumEquals(sequenceNum int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals("MSG#" + strconv.FormatInt(sequenceNum, 10)))
+}
+
+// SequenceNumBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("MSG#" + prefix))
+}
+
+// SequenceNumBetween adds a sort key between condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumBetween(sequenceNumStart int64, sequenceNumEnd int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between("MSG#"+strconv.FormatInt(sequenceNumStart, 10), "MSG#"+strconv.FormatInt(sequenceNumEnd, 10)))
+}
+
+// SequenceNumGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumGreaterThan(sequenceNum int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("MSG#" + strconv.FormatInt(sequenceNum, 10)))
+}
+
+// SequenceNumGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumGreaterThanOrEqual(sequenceNum int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("MSG#" + strconv.FormatInt(sequenceNum, 10)))
+}
+
+// SequenceNumLessThan adds a sort key < condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumLessThan(sequenceNum int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan("MSG#" + strconv.FormatInt(sequenceNum, 10)))
+}
+
+// SequenceNumLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q MessagePrimaryQuery) SequenceNumLessThanOrEqual(sequenceNum int64) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("MSG#" + strconv.FormatInt(sequenceNum, 10)))
+}
+
+// =============================================================================
+// Event Index Wrapper
+// =============================================================================
+
+// EventIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type EventIndexUtil struct {
+	*index.PrimaryIndex[Event]
+}
+
+// EventIndex is the typed wrapper for Event operations.
+var EventIndex = EventIndexUtil{PrimaryIndex: &eventIndex}
+
+// PrimaryKey creates a primary key from explicit parameters.
+func (idx EventIndexUtil) PrimaryKey(eventID string, timestamp time.Time) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "EVENT#" + eventID,
+			SortKey:      "EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano()),
+		},
+	}
+}
+
+// PrimaryKeyFrom creates the primary key from a Event entity.
+func (idx EventIndexUtil) PrimaryKeyFrom(e *Event) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "EVENT#" + e.EventID,
+			SortKey:      "EVENT#" + fmt.Sprintf("%020d", e.Timestamp.UnixNano()),
+		},
+	}
+}
+
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx EventIndexUtil) UnsafePut(e *Event) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+}
+
+// Delete creates a Delete operation.
+func (idx EventIndexUtil) Delete(eventID string, timestamp time.Time) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(eventID, timestamp))
+}
+
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx EventIndexUtil) UnsafeUpdate(eventID string, timestamp time.Time) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(eventID, timestamp))
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// EventPrimaryQuery is a query builder for the primary index.
+type EventPrimaryQuery struct {
+	idx *EventIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q EventPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx EventIndexUtil) QueryPartition(eventID string) EventPrimaryQuery {
+	return EventPrimaryQuery{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.Table, "EVENT#"+eventID),
+	}
+}
+
+// TimestampEquals adds a sort key equals condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampEquals(timestamp time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals("EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano())))
+}
+
+// TimestampBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("EVENT#" + prefix))
+}
+
+// TimestampBetween adds a sort key between condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampBetween(timestampStart time.Time, timestampEnd time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between("EVENT#"+fmt.Sprintf("%020d", timestampStart.UnixNano()), "EVENT#"+fmt.Sprintf("%020d", timestampEnd.UnixNano())))
+}
+
+// TimestampGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampGreaterThan(timestamp time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano())))
+}
+
+// TimestampGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampGreaterThanOrEqual(timestamp time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano())))
+}
+
+// TimestampLessThan adds a sort key < condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampLessThan(timestamp time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan("EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano())))
+}
+
+// TimestampLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q EventPrimaryQuery) TimestampLessThanOrEqual(timestamp time.Time) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano())))
 }
 
 // =============================================================================
@@ -318,7 +530,7 @@ func (idx RandomEntityIndexUtil) GSIKeysFrom(e *RandomEntity) []table.PrimaryKey
 			Definition: idx.Secondary[0].KeyDefinition(),
 			Values: table.PrimaryKeyValues{
 				PartitionKey: "LOL",
-				SortKey:      fmt.Sprintf("SAME#%s", e.ID),
+				SortKey:      "SAME#" + e.ID,
 			},
 		},
 	}
@@ -345,7 +557,7 @@ func (idx RandomEntityIndexUtil) GSI1Key(id string) table.PrimaryKey {
 		Definition: idx.Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "LOL",
-			SortKey:      fmt.Sprintf("SAME#%s", id),
+			SortKey:      "SAME#" + id,
 		},
 	}
 }
@@ -402,7 +614,7 @@ func (idx RandomEntityIndexGSI1Util) QueryPartition() RandomEntityGSI1Query {
 
 // IdEquals adds a sort key equals condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Equals(fmt.Sprintf("SAME#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.Equals("SAME#" + id))
 }
 
 // IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
@@ -412,25 +624,25 @@ func (q RandomEntityGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
 
 // IdBetween adds a sort key between condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Between(fmt.Sprintf("SAME#%s", idStart), fmt.Sprintf("SAME#%s", idEnd)))
+	return q.qd.WithSKCondition(ddbsdk.Between("SAME#"+idStart, "SAME#"+idEnd))
 }
 
 // IdGreaterThan adds a sort key > condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThan(fmt.Sprintf("SAME#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("SAME#" + id))
 }
 
 // IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual(fmt.Sprintf("SAME#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("SAME#" + id))
 }
 
 // IdLessThan adds a sort key < condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThan(fmt.Sprintf("SAME#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.LessThan("SAME#" + id))
 }
 
 // IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual(fmt.Sprintf("SAME#%s", id)))
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("SAME#" + id))
 }

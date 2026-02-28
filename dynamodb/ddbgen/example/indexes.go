@@ -3,11 +3,12 @@
 // Define indexes using PrimaryIndex with type parameters and string patterns.
 // Run the generator to produce type-safe key constructors:
 //
-//go:generate go run github.com/acksell/bezos/dynamodb/ddbgen/cmd/ddbgen
+//go:generate ddb gen
 package example
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/index/val"
@@ -56,6 +57,47 @@ var orderIndex = index.PrimaryIndex[Order]{
 	Table:        OrderTable,
 	PartitionKey: val.Fmt("TENANT#{tenantID}"),
 	SortKey:      val.Fmt("ORDER#{orderID}").Ptr(),
+}
+
+// MessageTable demonstrates using int64 fields in keys
+var MessageTable = table.TableDefinition{
+	Name: "messages",
+	KeyDefinitions: table.PrimaryKeyDefinition{
+		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+	},
+}
+
+// messageIndex demonstrates int64 in sort key with warning
+var messageIndex = index.PrimaryIndex[Message]{
+	Table:        MessageTable,
+	PartitionKey: val.Fmt("CHAT#{chatID}"),
+	SortKey:      val.Fmt("MSG#{sequenceNum}").Ptr(), // int64 without padding - should warn
+}
+
+// EventTable demonstrates time.Time keys
+var EventTable = table.TableDefinition{
+	Name: "events",
+	KeyDefinitions: table.PrimaryKeyDefinition{
+		PartitionKey: table.KeyDef{Name: "pk", Kind: table.KeyKindS},
+		SortKey:      table.KeyDef{Name: "sk", Kind: table.KeyKindS},
+	},
+}
+
+// Event demonstrates time.Time key formatting
+type Event struct {
+	EventID   string    `dynamodbav:"eventID"`
+	Timestamp time.Time `dynamodbav:"timestamp"`
+	EventType string    `dynamodbav:"eventType"`
+}
+
+func (e *Event) IsValid() error { return nil }
+
+// eventIndex demonstrates time.Time in sort key with unixnano format (padded)
+var eventIndex = index.PrimaryIndex[Event]{
+	Table:        EventTable,
+	PartitionKey: val.Fmt("EVENT#{eventID}"),
+	SortKey:      val.Fmt("EVENT#{timestamp:unixnano:%020d}").Ptr(), // padded - no warning
 }
 
 var SingleTable = table.TableDefinition{

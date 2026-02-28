@@ -2,87 +2,6 @@
 
 tables:
   - table:
-      name: messages
-      partitionKey:
-        name: pk
-        kind: S
-      sortKey:
-        name: sk
-        kind: S
-    entities:
-      - type: Message
-        partitionKeyPattern: PROJECT#{project_id}
-        sortKeyPattern: MSG#{sequence}
-        fields:
-          - name: ProjectID
-            tag: project_id
-            type: string
-          - name: Sequence
-            tag: sequence
-            type: int64
-          - name: Role
-            tag: role
-            type: string
-          - name: Content
-            tag: content
-            type: string
-          - name: DurationMs
-            tag: duration_ms
-            type: int64
-          - name: CreatedAt
-            tag: created_at
-            type: Time
-  - table:
-      name: events
-      partitionKey:
-        name: pk
-        kind: S
-      sortKey:
-        name: sk
-        kind: S
-    entities:
-      - type: Event
-        partitionKeyPattern: PROJECT#{project_id}
-        sortKeyPattern: EVENT#{timestamp:unixnano:%020d}
-        fields:
-          - name: ProjectID
-            tag: project_id
-            type: string
-          - name: Timestamp
-            tag: timestamp
-            type: Time
-          - name: EventType
-            tag: event_type
-            type: string
-  - table:
-      name: single-table
-      partitionKey:
-        name: pk
-        kind: S
-      sortKey:
-        name: sk
-        kind: B
-      gsis:
-        - name: GSI1
-          partitionKey:
-            name: gsi1pk
-            kind: S
-          sortKey:
-            name: gsi1sk
-            kind: S
-    entities:
-      - type: RandomEntity
-        partitionKeyPattern: world
-        sortKeyPattern: SGVsbG8=
-        fields:
-          - name: ID
-            tag: id
-            type: string
-        gsiMappings:
-          - gsi: GSI1
-            partitionPattern: LOL
-            sortPattern: SAME#{id}
-  - table:
       name: users
       partitionKey:
         name: pk
@@ -142,3 +61,78 @@ tables:
           - name: Amount
             tag: amount
             type: int
+  - table:
+      name: messages
+      partitionKey:
+        name: pk
+        kind: S
+      sortKey:
+        name: sk
+        kind: S
+    entities:
+      - type: Message
+        partitionKeyPattern: CHAT#{chatID}
+        sortKeyPattern: MSG#{sequenceNum}
+        fields:
+          - name: ChatID
+            tag: chatID
+            type: string
+          - name: SequenceNum
+            tag: sequenceNum
+            type: int64
+          - name: Content
+            tag: content
+            type: string
+          - name: CreatedAt
+            tag: createdAt
+            type: Time
+  - table:
+      name: events
+      partitionKey:
+        name: pk
+        kind: S
+      sortKey:
+        name: sk
+        kind: S
+    entities:
+      - type: Event
+        partitionKeyPattern: EVENT#{eventID}
+        sortKeyPattern: EVENT#{timestamp:unixnano:%020d}
+        fields:
+          - name: EventID
+            tag: eventID
+            type: string
+          - name: Timestamp
+            tag: timestamp
+            type: Time
+          - name: EventType
+            tag: eventType
+            type: string
+  - table:
+      name: single-table
+      partitionKey:
+        name: pk
+        kind: S
+      sortKey:
+        name: sk
+        kind: B
+      gsis:
+        - name: GSI1
+          partitionKey:
+            name: gsi1pk
+            kind: S
+          sortKey:
+            name: gsi1sk
+            kind: S
+    entities:
+      - type: RandomEntity
+        partitionKeyPattern: world
+        sortKeyPattern: SGVsbG8=
+        fields:
+          - name: ID
+            tag: id
+            type: string
+        gsiMappings:
+          - gsi: GSI1
+            partitionPattern: LOL
+            sortPattern: SAME#{id}

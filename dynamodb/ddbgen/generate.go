@@ -5,35 +5,72 @@ import (
 	"encoding/base64"
 	"fmt"
 	"go/format"
-	"regexp"
+	"io"
+	"os"
 	"strings"
 	"text/template"
+
+	"github.com/acksell/bezos/dynamodb/index/val"
 )
+
+// GenerateOptions configures code generation behavior.
+type GenerateOptions struct {
+	// WarnWriter receives warning messages. Defaults to os.Stderr if nil.
+	WarnWriter io.Writer
+}
 
 // Generate produces type-safe key constructor code from discovered indexes.
 func Generate(result *DiscoverResult) ([]byte, error) {
+	return GenerateWithOptions(result, GenerateOptions{WarnWriter: os.Stderr})
+}
+
+// GenerateWithOptions produces type-safe key constructor code with configurable options.
+func GenerateWithOptions(result *DiscoverResult, opts GenerateOptions) ([]byte, error) {
+	if opts.WarnWriter == nil {
+		opts.WarnWriter = os.Stderr
+	}
+
 	if len(result.Indexes) == 0 {
 		return nil, fmt.Errorf("no indexes to generate")
 	}
 
 	// Convert discovery result to template data
 	indexes := make([]indexData, 0, len(result.Indexes))
+	needsStrconv := false
+	needsTime := false
+
 	for _, idx := range result.Indexes {
-		data, err := buildIndexData(idx, result.EntityFields[idx.EntityType])
+		data, err := buildIndexData(idx, result.EntityFields[idx.EntityType], opts.WarnWriter)
 		if err != nil {
 			return nil, fmt.Errorf("building data for %s: %w", idx.VarName, err)
 		}
 		indexes = append(indexes, data)
+
+		// Check if we need strconv import
+		if needsStrconvImport(data) {
+			needsStrconv = true
+		}
+		if needsTimeImport(data) {
+			needsTime = true
+		}
+	}
+
+	imports := []string{
+		`"fmt"`,
+		`"github.com/acksell/bezos/dynamodb/ddbsdk"`,
+		`"github.com/acksell/bezos/dynamodb/index"`,
+		`"github.com/acksell/bezos/dynamodb/table"`,
+	}
+	if needsStrconv {
+		imports = append([]string{`"strconv"`}, imports...)
+	}
+	if needsTime {
+		imports = append([]string{`"time"`}, imports...)
 	}
 
 	tmplData := templateData{
 		Package: result.PackageName,
-		Imports: []string{
-			`"fmt"`,
-			`"github.com/acksell/bezos/dynamodb/ddbsdk"`,
-			`"github.com/acksell/bezos/dynamodb/index"`,
-			`"github.com/acksell/bezos/dynamodb/table"`,
-		},
+		Imports: imports,
 		Indexes: indexes,
 	}
 
@@ -90,12 +127,17 @@ type keyData struct {
 	IsConstant       bool        // True if the key has no field references
 	LiteralPrefix    string      // Leading literal portion before first field ref (for BeginsWith)
 	FieldRefNames    []string    // Field reference names in the pattern (e.g., ["orderID"])
+	UsesStrconv      bool        // True if strconv package is needed
+	UsesTime         bool        // True if time package is needed
 }
 
 // paramData represents a function parameter.
 type paramData struct {
-	Name string
-	Type string
+	Name       string
+	Type       string
+	FieldType  string   // Original Go type from struct (e.g., "int64", "time.Time")
+	Formats    []string // Format modifiers (e.g., ["utc", "rfc3339"] or ["unixnano"])
+	PrintfSpec string   // Printf spec for padded formats (e.g., "%020d")
 }
 
 // gsiData holds introspected data about a GSI.
@@ -107,15 +149,53 @@ type gsiData struct {
 	HasSortKey   bool
 }
 
+// needsStrconvImport checks if any key in the index needs strconv import.
+func needsStrconvImport(idx indexData) bool {
+	if idx.PartitionKey.UsesStrconv {
+		return true
+	}
+	if idx.SortKey != nil && idx.SortKey.UsesStrconv {
+		return true
+	}
+	for _, gsi := range idx.GSIs {
+		if gsi.PartitionKey.UsesStrconv {
+			return true
+		}
+		if gsi.SortKey != nil && gsi.SortKey.UsesStrconv {
+			return true
+		}
+	}
+	return false
+}
+
+// needsTimeImport checks if any key in the index needs time import.
+func needsTimeImport(idx indexData) bool {
+	if idx.PartitionKey.UsesTime {
+		return true
+	}
+	if idx.SortKey != nil && idx.SortKey.UsesTime {
+		return true
+	}
+	for _, gsi := range idx.GSIs {
+		if gsi.PartitionKey.UsesTime {
+			return true
+		}
+		if gsi.SortKey != nil && gsi.SortKey.UsesTime {
+			return true
+		}
+	}
+	return false
+}
+
 // buildIndexData converts an IndexInfo to indexData for the template.
-func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
+func buildIndexData(idx IndexInfo, fields []FieldInfo, warnWriter io.Writer) (indexData, error) {
 	// Build tag-to-field mapping
 	tagMap := make(map[string]FieldInfo)
 	for _, f := range fields {
 		tagMap[f.Tag] = f
 	}
 
-	pkData, err := buildKeyData(idx.PartitionKey, tagMap)
+	pkData, err := buildKeyData(idx.PartitionKey, tagMap, false, idx.EntityType, warnWriter)
 	if err != nil {
 		return indexData{}, fmt.Errorf("partition key: %w", err)
 	}
@@ -129,7 +209,7 @@ func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
 	}
 
 	if idx.SortKey.Pattern != "" {
-		skData, err := buildKeyData(idx.SortKey, tagMap)
+		skData, err := buildKeyData(idx.SortKey, tagMap, true, idx.EntityType, warnWriter)
 		if err != nil {
 			return indexData{}, fmt.Errorf("sort key: %w", err)
 		}
@@ -139,7 +219,7 @@ func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
 
 	// Process GSIs
 	for _, gsi := range idx.GSIs {
-		gsiData, err := buildGSIData(gsi, tagMap)
+		gsiData, err := buildGSIData(gsi, tagMap, idx.EntityType, warnWriter)
 		if err != nil {
 			return indexData{}, fmt.Errorf("GSI %s: %w", gsi.Name, err)
 		}
@@ -150,8 +230,8 @@ func buildIndexData(idx IndexInfo, fields []FieldInfo) (indexData, error) {
 }
 
 // buildGSIData converts a GSIInfo to gsiData for the template.
-func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo) (gsiData, error) {
-	pkData, err := buildKeyData(gsi.PKPattern, tagMap)
+func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo, entityType string, warnWriter io.Writer) (gsiData, error) {
+	pkData, err := buildKeyData(gsi.PKPattern, tagMap, false, entityType, warnWriter)
 	if err != nil {
 		return gsiData{}, fmt.Errorf("partition key: %w", err)
 	}
@@ -163,7 +243,7 @@ func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo) (gsiData, error) {
 	}
 
 	if gsi.SKPattern.Pattern != "" {
-		skData, err := buildKeyData(gsi.SKPattern, tagMap)
+		skData, err := buildKeyData(gsi.SKPattern, tagMap, true, entityType, warnWriter)
 		if err != nil {
 			return gsiData{}, fmt.Errorf("sort key: %w", err)
 		}
@@ -174,19 +254,20 @@ func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo) (gsiData, error) {
 	return data, nil
 }
 
-// fieldRefRegex matches {fieldName} or {nested.field.path} patterns
-var fieldRefRegex = regexp.MustCompile(`\{([^}]+)\}`)
-
 // buildKeyData converts a key pattern to keyData for the template.
-func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo) (keyData, error) {
+func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo, isSortKey bool, entityType string, warnWriter io.Writer) (keyData, error) {
 	pattern := kp.Pattern
-	// Find all field references
-	matches := fieldRefRegex.FindAllStringSubmatch(pattern, -1)
 
-	if len(matches) == 0 {
+	// Parse the pattern using val.FmtSpec
+	spec, err := val.ParseFmt(pattern)
+	if err != nil {
+		return keyData{}, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+	}
+
+	if spec.IsConstant() {
 		// Constant pattern - no parameters
 		formatExpr := fmt.Sprintf("%q", pattern)
-		
+
 		// For bytes, decode base64 and generate a byte slice literal
 		if kp.Kind == KeyKindBytes {
 			decoded, err := base64.StdEncoding.DecodeString(pattern)
@@ -195,7 +276,7 @@ func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo) (keyData, error) {
 			}
 			formatExpr = formatByteLiteral(decoded)
 		}
-		
+
 		return keyData{
 			Params:           nil,
 			FormatExpr:       formatExpr,
@@ -209,55 +290,76 @@ func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo) (keyData, error) {
 	var formatParts []string
 	var entityFormatParts []string
 	var fieldRefNames []string
+	usesStrconv := false
+	usesTime := false
 
-	// Extract literal prefix (everything before the first field reference)
-	firstMatchLocs := fieldRefRegex.FindStringSubmatchIndex(pattern)
-	literalPrefix := ""
-	if firstMatchLocs != nil && firstMatchLocs[0] > 0 {
-		literalPrefix = pattern[:firstMatchLocs[0]]
-	}
+	literalPrefix := spec.LiteralPrefix()
 
-	// Split the pattern into parts
-	lastEnd := 0
-	for _, loc := range fieldRefRegex.FindAllStringSubmatchIndex(pattern, -1) {
-		start, end := loc[0], loc[1]
-		fieldName := pattern[loc[2]:loc[3]]
-
-		// Add literal before this field
-		if start > lastEnd {
-			literal := pattern[lastEnd:start]
-			formatParts = append(formatParts, fmt.Sprintf("%q", literal))
-			entityFormatParts = append(entityFormatParts, fmt.Sprintf("%q", literal))
+	// Process each part of the parsed spec
+	for _, part := range spec.Parts {
+		if part.IsLiteral {
+			formatParts = append(formatParts, fmt.Sprintf("%q", part.Value))
+			entityFormatParts = append(entityFormatParts, fmt.Sprintf("%q", part.Value))
+			continue
 		}
 
-		// Add field reference
-		// Use last component as param name (for nested fields like "user.id", use "id")
-		pathParts := strings.Split(fieldName, ".")
-		paramName := pathParts[len(pathParts)-1]
-		params = append(params, paramData{Name: paramName, Type: "string"})
-		formatParts = append(formatParts, paramName)
-		fieldRefNames = append(fieldRefNames, paramName)
+		// Field reference
+		fieldPath := part.Value
 
 		// Find Go field from tag map
-		if field, ok := tagMap[fieldName]; ok {
-			entityFormatParts = append(entityFormatParts, "e."+field.Name)
-		} else {
-			return keyData{}, fmt.Errorf("no struct field found with tag %q", fieldName)
+		field, ok := tagMap[fieldPath]
+		if !ok {
+			return keyData{}, fmt.Errorf("no struct field found with tag %q", fieldPath)
 		}
 
-		lastEnd = end
-	}
+		// Get param name from the SpecPart
+		paramName := part.ParamName()
+		paramType := part.GoParamType(field.Type)
 
-	// Add trailing literal
-	if lastEnd < len(pattern) {
-		literal := pattern[lastEnd:]
-		formatParts = append(formatParts, fmt.Sprintf("%q", literal))
-		entityFormatParts = append(entityFormatParts, fmt.Sprintf("%q", literal))
+		// Track if we need time import for parameter type
+		if paramType == "time.Time" {
+			usesTime = true
+		}
+
+		params = append(params, paramData{
+			Name:       paramName,
+			Type:       paramType,
+			FieldType:  field.Type,
+			Formats:    part.Formats,
+			PrintfSpec: part.PrintfSpec,
+		})
+
+		// Emit sort key warning if applicable
+		if isSortKey {
+			if warning := part.SortKeyWarning(field.Type, entityType); warning != "" {
+				fmt.Fprint(warnWriter, warning)
+			}
+		}
+
+		// Generate param format expression
+		paramResult, err := part.GenerateConversionExpr(paramName, field.Type)
+		if err != nil {
+			return keyData{}, fmt.Errorf("field %q: %w", fieldPath, err)
+		}
+		formatParts = append(formatParts, paramResult.Expr)
+		fieldRefNames = append(fieldRefNames, paramName)
+		usesStrconv = usesStrconv || paramResult.UsesStrconv
+		usesTime = usesTime || paramResult.UsesTime
+
+		// Generate entity format expression
+		entityFieldExpr := "e." + field.Name
+		entityResult, err := part.GenerateConversionExpr(entityFieldExpr, field.Type)
+		if err != nil {
+			return keyData{}, fmt.Errorf("field %q: %w", fieldPath, err)
+		}
+		entityFormatParts = append(entityFormatParts, entityResult.Expr)
+		usesStrconv = usesStrconv || entityResult.UsesStrconv
+		usesTime = usesTime || entityResult.UsesTime
 	}
 
 	// Build format expressions
-	formatExpr := buildFormatExpr(params, formatParts)
-	entityFormatExpr := buildFormatExprFromParts(entityFormatParts)
+	formatExpr := buildTypedFormatExpr(formatParts)
+	entityFormatExpr := buildTypedFormatExpr(entityFormatParts)
 
 	return keyData{
 		Params:           params,
@@ -266,7 +368,42 @@ func buildKeyData(kp KeyPattern, tagMap map[string]FieldInfo) (keyData, error) {
 		IsConstant:       false,
 		LiteralPrefix:    literalPrefix,
 		FieldRefNames:    fieldRefNames,
+		UsesStrconv:      usesStrconv,
+		UsesTime:         usesTime,
 	}, nil
+}
+
+// buildTypedFormatExpr builds a Go expression from parts that are either
+// quoted constants or conversion expressions.
+func buildTypedFormatExpr(parts []string) string {
+	if len(parts) == 0 {
+		return `""`
+	}
+	if len(parts) == 1 {
+		p := parts[0]
+		// If it's a quoted string, return as-is
+		if strings.HasPrefix(p, `"`) && strings.HasSuffix(p, `"`) {
+			return p
+		}
+		// Otherwise it's an expression that returns string
+		return p
+	}
+
+	// Multiple parts - need to concatenate
+	// Check if all parts are simple string values or expressions
+	var resultParts []string
+	for _, p := range parts {
+		if strings.HasPrefix(p, `"`) && strings.HasSuffix(p, `"`) {
+			// Quoted constant
+			resultParts = append(resultParts, p)
+		} else {
+			// Expression
+			resultParts = append(resultParts, p)
+		}
+	}
+
+	// Use string concatenation
+	return strings.Join(resultParts, " + ")
 }
 
 // formatByteLiteral generates a Go byte slice literal like []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f}.
@@ -279,76 +416,6 @@ func formatByteLiteral(data []byte) string {
 		parts = append(parts, fmt.Sprintf("0x%02x", b))
 	}
 	return "[]byte{" + strings.Join(parts, ", ") + "}"
-}
-
-// buildFormatExpr builds a Go expression to format a key value.
-func buildFormatExpr(params []paramData, parts []string) string {
-	if len(params) == 0 {
-		// No parameters - just return the constant
-		if len(parts) == 1 {
-			return parts[0]
-		}
-		return strings.Join(parts, " + ")
-	}
-
-	// Build fmt.Sprintf call
-	var fmtParts []string
-	var args []string
-
-	for _, part := range parts {
-		// Check if this part is a parameter name
-		isParam := false
-		for _, p := range params {
-			if part == p.Name {
-				isParam = true
-				args = append(args, part)
-				fmtParts = append(fmtParts, "%s")
-				break
-			}
-		}
-		if !isParam {
-			// It's a quoted constant - extract the value
-			fmtParts = append(fmtParts, strings.Trim(part, `"`))
-		}
-	}
-
-	formatStr := strings.Join(fmtParts, "")
-	if len(args) == 0 {
-		return fmt.Sprintf("%q", formatStr)
-	}
-	return fmt.Sprintf("fmt.Sprintf(%q, %s)", formatStr, strings.Join(args, ", "))
-}
-
-// buildFormatExprFromParts builds a Go expression from parts that are either
-// quoted constants (e.g., `"USER#"`) or Go expressions (e.g., `e.UserID`).
-func buildFormatExprFromParts(parts []string) string {
-	if len(parts) == 0 {
-		return `""`
-	}
-	if len(parts) == 1 {
-		return parts[0]
-	}
-
-	// Build fmt.Sprintf call
-	var fmtParts []string
-	var args []string
-
-	for _, part := range parts {
-		if strings.HasPrefix(part, `"`) {
-			// Quoted constant - extract the value for format string
-			fmtParts = append(fmtParts, strings.Trim(part, `"`))
-		} else {
-			// Go expression (e.g., e.UserID) - use %s placeholder
-			fmtParts = append(fmtParts, "%s")
-			args = append(args, part)
-		}
-	}
-
-	formatStr := strings.Join(fmtParts, "")
-	if len(args) == 0 {
-		return fmt.Sprintf("%q", formatStr)
-	}
-	return fmt.Sprintf("fmt.Sprintf(%q, %s)", formatStr, strings.Join(args, ", "))
 }
 
 var templateFuncs = template.FuncMap{
@@ -484,30 +551,61 @@ var templateFuncs = template.FuncMap{
 }
 
 // buildSKBoundExpr builds a Go expression for a sort key bound (used in Between, GT, LT, etc.).
+// The suffix is appended to param names (e.g., "Start" for Between start values).
 func buildSKBoundExpr(kd keyData, suffix string) string {
 	if len(kd.Params) == 0 {
 		return kd.FormatExpr
 	}
+
+	// For non-string types, we need to generate proper conversion expressions
+	// using the same logic as the primary key generation
 	if len(kd.Params) == 1 {
-		paramName := kd.Params[0].Name + suffix
+		p := kd.Params[0]
+		paramName := p.Name + suffix
+
+		// Create a val.SpecPart to use its GenerateConversionExpr method
+		specPart := val.SpecPart{
+			Value:      p.Name,
+			Formats:    p.Formats,
+			PrintfSpec: p.PrintfSpec,
+		}
+
+		result, err := specPart.GenerateConversionExpr(paramName, p.FieldType)
+		if err != nil {
+			// Fall back to string conversion for safety
+			return fmt.Sprintf("fmt.Sprintf(\"%%v\", %s)", paramName)
+		}
+
+		expr := result.Expr
 		if kd.LiteralPrefix != "" {
-			return fmt.Sprintf("fmt.Sprintf(%q, %s)", kd.LiteralPrefix+"%s", paramName)
+			return fmt.Sprintf("%q + %s", kd.LiteralPrefix, expr)
 		}
-		return paramName
+		return expr
 	}
-	// Multiple params: use the full format pattern with suffixed param names
-	var fmtParts []string
-	var args []string
-	fmtParts = append(fmtParts, kd.LiteralPrefix)
-	for i, p := range kd.Params {
-		args = append(args, p.Name+suffix)
-		if i > 0 {
-			// Add inter-field literal separators — but we don't have them easily.
-			// Fall back to the format expression with suffixed args.
+
+	// Multiple params: build the full expression with proper conversions
+	var parts []string
+	if kd.LiteralPrefix != "" {
+		parts = append(parts, fmt.Sprintf("%q", kd.LiteralPrefix))
+	}
+
+	for _, p := range kd.Params {
+		paramName := p.Name + suffix
+		specPart := val.SpecPart{
+			Value:      p.Name,
+			Formats:    p.Formats,
+			PrintfSpec: p.PrintfSpec,
 		}
-		fmtParts = append(fmtParts, "%s")
+
+		result, err := specPart.GenerateConversionExpr(paramName, p.FieldType)
+		if err != nil {
+			parts = append(parts, fmt.Sprintf("fmt.Sprintf(\"%%v\", %s)", paramName))
+		} else {
+			parts = append(parts, result.Expr)
+		}
 	}
-	return fmt.Sprintf("fmt.Sprintf(%q, %s)", strings.Join(fmtParts, ""), strings.Join(args, ", "))
+
+	return strings.Join(parts, " + ")
 }
 
 const mainTemplate = `// Code generated by ddbgen. DO NOT EDIT.

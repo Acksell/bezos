@@ -107,8 +107,8 @@ func TestFmtSpec_FieldRefs(t *testing.T) {
 				return
 			}
 			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("FieldRefs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				if got[i].Value != tt.want[i] {
+					t.Errorf("FieldRefs()[%d].Value = %q, want %q", i, got[i].Value, tt.want[i])
 				}
 			}
 		})
@@ -118,12 +118,12 @@ func TestFmtSpec_FieldRefs(t *testing.T) {
 func TestFmtSpec_FieldPaths(t *testing.T) {
 	tests := []struct {
 		pattern string
-		want    [][]string
+		want    []string
 	}{
 		{"PROFILE", nil},
-		{"USER#{id}", [][]string{{"id"}}},
-		{"{user.address.city}", [][]string{{"user", "address", "city"}}},
-		{"ORDER#{tenant}#{order.id}", [][]string{{"tenant"}, {"order", "id"}}},
+		{"USER#{id}", []string{"id"}},
+		{"{user.address.city}", []string{"user.address.city"}},
+		{"ORDER#{tenant}#{order.id}", []string{"tenant", "order.id"}},
 	}
 
 	for _, tt := range tests {
@@ -135,14 +135,8 @@ func TestFmtSpec_FieldPaths(t *testing.T) {
 				return
 			}
 			for i := range got {
-				if len(got[i]) != len(tt.want[i]) {
-					t.Errorf("FieldPaths()[%d] = %v, want %v", i, got[i], tt.want[i])
-					continue
-				}
-				for j := range got[i] {
-					if got[i][j] != tt.want[i][j] {
-						t.Errorf("FieldPaths()[%d][%d] = %q, want %q", i, j, got[i][j], tt.want[i][j])
-					}
+				if got[i] != tt.want[i] {
+					t.Errorf("FieldPaths()[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
 			}
 		})

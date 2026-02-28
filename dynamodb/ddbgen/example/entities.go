@@ -31,3 +31,16 @@ type Order struct {
 func (o *Order) IsValid() error {
 	return nil
 }
+
+// Message represents a chat message in a project's conversation history.
+type Message struct {
+	ChatID      string    `dynamodbav:"chatID"`
+	SequenceNum int64     `dynamodbav:"sequenceNum"`
+	Content     string    `dynamodbav:"content"`
+	CreatedAt   time.Time `dynamodbav:"createdAt"`
+}
+
+// IsValid implements ddbsdk.DynamoEntity.
+func (m *Message) IsValid() error {
+	return nil
+}
