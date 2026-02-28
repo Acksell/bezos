@@ -9,76 +9,96 @@
         currentTable: null,
         currentSchema: null,
         items: [],
+        queryItems: [],
         lastKey: null,
-        loading: false
+        loading: false,
+        selectedIndices: new Set(),
+        selectedQueryIndices: new Set()
     };
 
-    // Pattern parsing utilities
-    function parsePattern(pattern) {
-        // Parse pattern like "USER#{id}" into { prefix: "USER#", variables: ["id"], regex: /^USER#(.+)$/ }
-        if (!pattern) return null;
-        
-        const parts = [];
-        const variables = [];
-        let regex = '^';
-        let lastEnd = 0;
-        
-        const varRegex = /#\{(\w+)\}/g;
-        let match;
-        
-        while ((match = varRegex.exec(pattern)) !== null) {
-            const prefix = pattern.slice(lastEnd, match.index);
-            if (prefix) {
-                parts.push({ type: 'static', value: prefix });
-                regex += escapeRegex(prefix);
-            }
-            parts.push({ type: 'variable', name: match[1] });
-            variables.push(match[1]);
-            regex += '(.+?)';
-            lastEnd = match.index + match[0].length;
-        }
-        
-        const suffix = pattern.slice(lastEnd);
-        if (suffix) {
-            parts.push({ type: 'static', value: suffix });
-            regex += escapeRegex(suffix);
-        }
-        regex += '$';
-        
-        return {
-            pattern,
-            parts,
-            variables,
-            regex: new RegExp(regex),
-            isStatic: variables.length === 0
-        };
-    }
-
+    // Pattern utilities - uses parsed patterns from backend
+    // The backend provides patterns as arrays of parts: {isLiteral, value, formats, printfSpec, fieldType}
+    
     function escapeRegex(str) {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    function matchPattern(parsedPattern, value) {
+    // Build a regex from parsed pattern parts (from backend)
+    function buildRegexFromParsed(parsedPattern) {
+        if (!parsedPattern || !parsedPattern.parts) return null;
+        
+        let regex = '^';
+        const variables = [];
+        
+        for (const part of parsedPattern.parts) {
+            if (part.isLiteral) {
+                regex += escapeRegex(part.value);
+            } else {
+                // Variable - capture any characters
+                variables.push(part.value);
+                regex += '(.+?)';
+            }
+        }
+        regex += '$';
+        
+        return {
+            regex: new RegExp(regex),
+            variables,
+            isStatic: variables.length === 0
+        };
+    }
+
+    // Match a value against a parsed pattern
+    function matchParsedPattern(parsedPattern, value) {
         if (!parsedPattern || !value) return null;
-        const match = String(value).match(parsedPattern.regex);
+        
+        const regexInfo = buildRegexFromParsed(parsedPattern);
+        if (!regexInfo) return null;
+        
+        const match = String(value).match(regexInfo.regex);
         if (!match) return null;
         
         const result = {};
-        parsedPattern.variables.forEach((v, i) => {
+        regexInfo.variables.forEach((v, i) => {
             result[v] = match[i + 1];
         });
         return result;
     }
 
-    function buildFromPattern(parsedPattern, values) {
-        if (!parsedPattern) return '';
-        return parsedPattern.parts.map(p => {
-            if (p.type === 'static') return p.value;
-            return values[p.name] || '';
+    // Build a key value from parsed pattern and variable values
+    function buildFromParsedPattern(parsedPattern, values) {
+        if (!parsedPattern || !parsedPattern.parts) return '';
+        
+        return parsedPattern.parts.map(part => {
+            if (part.isLiteral) {
+                return part.value;
+            }
+            // Variable reference - use the value from input
+            return values[part.value] || '';
         }).join('');
     }
 
-    // Entity detection
+    // Get variable names from a parsed pattern
+    function getVariablesFromParsed(parsedPattern) {
+        if (!parsedPattern || !parsedPattern.parts) return [];
+        return parsedPattern.parts
+            .filter(p => !p.isLiteral)
+            .map(p => ({ name: p.value, fieldType: p.fieldType, formats: p.formats }));
+    }
+
+    // Check if a parsed pattern is static (no variables)
+    function isStaticPattern(parsedPattern) {
+        if (!parsedPattern || !parsedPattern.parts) return true;
+        return parsedPattern.parts.every(p => p.isLiteral);
+    }
+
+    // Get the static value if pattern is fully literal
+    function getStaticValue(parsedPattern) {
+        if (!parsedPattern || !parsedPattern.parts) return '';
+        return parsedPattern.parts.map(p => p.value).join('');
+    }
+
+    // Entity detection using backend-parsed patterns
     function detectEntityType(item, schema) {
         if (!schema || !schema.entities) return null;
         
@@ -88,15 +108,19 @@
         const skVal = skName ? item[skName] : null;
         
         for (const entity of schema.entities) {
-            const pkParsed = parsePattern(entity.partitionKeyPattern);
-            const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+            // Use backend-parsed patterns if available
+            const pkParsed = entity.partitionKeyParsed;
+            const skParsed = entity.sortKeyParsed;
             
-            const pkMatch = matchPattern(pkParsed, pkVal);
+            const pkMatch = matchParsedPattern(pkParsed, pkVal);
             if (!pkMatch) continue;
             
-            if (skParsed) {
-                const skMatch = matchPattern(skParsed, skVal);
+            if (skParsed && !isStaticPattern(skParsed)) {
+                const skMatch = matchParsedPattern(skParsed, skVal);
                 if (!skMatch) continue;
+            } else if (skParsed && isStaticPattern(skParsed)) {
+                // Static SK - must match exactly
+                if (skVal !== getStaticValue(skParsed)) continue;
             }
             
             return entity.type;
@@ -235,6 +259,7 @@
                 state.currentSchema = await api.get(`/tables/${tableName}`);
                 state.items = [];
                 state.lastKey = null;
+                state.selectedIndices.clear();
             }
 
             // Update UI
@@ -268,9 +293,15 @@
                     entitySelect.value = entity;
                     renderEntityQueryFields(entity);
                 }
-            } else if (needsLoad) {
-                // Load data only when switching tables (not entities)
-                await loadData();
+            } else {
+                // Switch to scan tab when clicking table name
+                $$('.tab').forEach(t => t.classList.remove('active'));
+                $$('.tab-content').forEach(c => c.classList.remove('active'));
+                $('.tab[data-tab="data"]').classList.add('active');
+                $('#tab-data').classList.add('active');
+                if (needsLoad || state.items.length === 0) {
+                    await loadData();
+                }
             }
         } catch (err) {
             console.error('Failed to load table:', err);
@@ -395,8 +426,9 @@
             return;
         }
         
-        const pkParsed = parsePattern(entity.partitionKeyPattern);
-        const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+        // Use backend-parsed patterns
+        const pkParsed = entity.partitionKeyParsed;
+        const skParsed = entity.sortKeyParsed;
         
         let html = '';
         
@@ -408,17 +440,18 @@
         }
         html += `</div>`;
         
-        // Collect PK variables
-        const pkVars = pkParsed?.variables || [];
-        // Collect SK variables (excluding those already in PK)
-        const skVars = (skParsed?.variables || []).filter(v => !pkVars.includes(v));
+        // Collect PK variables using backend-parsed info
+        const pkVars = getVariablesFromParsed(pkParsed);
+        // Collect SK variables (excluding those already in PK by name)
+        const pkVarNames = pkVars.map(v => v.name);
+        const skVars = getVariablesFromParsed(skParsed).filter(v => !pkVarNames.includes(v.name));
         
         // If patterns are static, show simple message
         if (pkVars.length === 0 && skVars.length === 0) {
-            if (pkParsed?.isStatic) {
+            if (isStaticPattern(pkParsed)) {
                 html += `<p class="info-text">PK is static: <code>${entity.partitionKeyPattern}</code></p>`;
             }
-            if (skParsed?.isStatic) {
+            if (isStaticPattern(skParsed)) {
                 html += `<p class="info-text">SK is static: <code>${entity.sortKeyPattern}</code></p>`;
             }
         } else {
@@ -427,11 +460,12 @@
                 html += `<div class="query-section-group">`;
                 html += `<h4 class="query-section-title">Partition Key</h4>`;
                 html += `<div class="query-fields-grid">`;
-                for (const varName of pkVars) {
+                for (const varInfo of pkVars) {
+                    const typeHint = varInfo.fieldType ? ` (${varInfo.fieldType})` : '';
                     html += `
                         <div class="form-group">
-                            <label for="qv-${varName}">${varName}:</label>
-                            <input type="text" id="qv-${varName}" class="query-var" data-var="${varName}" placeholder="Enter ${varName}">
+                            <label for="qv-${varInfo.name}">${varInfo.name}${typeHint}:</label>
+                            <input type="text" id="qv-${varInfo.name}" class="query-var" data-var="${varInfo.name}" placeholder="Enter ${varInfo.name}">
                         </div>
                     `;
                 }
@@ -443,11 +477,12 @@
                 html += `<div class="query-section-group">`;
                 html += `<h4 class="query-section-title">Sort Key</h4>`;
                 html += `<div class="query-fields-grid">`;
-                for (const varName of skVars) {
+                for (const varInfo of skVars) {
+                    const typeHint = varInfo.fieldType ? ` (${varInfo.fieldType})` : '';
                     html += `
                         <div class="form-group">
-                            <label for="qv-${varName}">${varName}:</label>
-                            <input type="text" id="qv-${varName}" class="query-var" data-var="${varName}" placeholder="Enter ${varName}">
+                            <label for="qv-${varInfo.name}">${varInfo.name}${typeHint}:</label>
+                            <input type="text" id="qv-${varInfo.name}" class="query-var" data-var="${varInfo.name}" placeholder="Enter ${varInfo.name}">
                         </div>
                     `;
                 }
@@ -493,8 +528,9 @@
         const entity = state.currentSchema?.entities?.find(e => e.type === entityType);
         if (!entity) return;
         
-        const pkParsed = parsePattern(entity.partitionKeyPattern);
-        const skParsed = entity.sortKeyPattern ? parsePattern(entity.sortKeyPattern) : null;
+        // Use backend-parsed patterns
+        const pkParsed = entity.partitionKeyParsed;
+        const skParsed = entity.sortKeyParsed;
         
         // Gather variable values
         const varValues = {};
@@ -502,8 +538,8 @@
             varValues[input.dataset.var] = input.value;
         });
         
-        // Build the actual PK value
-        const pkVal = buildFromPattern(pkParsed, varValues);
+        // Build the actual PK value using backend-parsed pattern
+        const pkVal = buildFromParsedPattern(pkParsed, varValues);
         if (!pkVal) {
             alert('Partition key value is required');
             return;
@@ -524,7 +560,7 @@
         // Handle sort key based on mode
         const skMode = $('#query-sk-mode')?.value || 'none';
         if (skParsed && skName && skMode !== 'none') {
-            const skVal = buildFromPattern(skParsed, varValues);
+            const skVal = buildFromParsedPattern(skParsed, varValues);
             names['#sk'] = skName;
             // Convert sk value based on key type
             values[':sk'] = convertKeyValue(skVal, skKind);
@@ -629,13 +665,19 @@
             return a.localeCompare(b);
         });
 
-        // Add Entity as first column
-        const columns = ['_entity', ...sortedKeys];
+        // Add Entity as first column, checkbox as zeroth
+        const columns = ['_select', '_entity', ...sortedKeys];
+        
+        // Check if all items are selected
+        const allSelected = state.items.length > 0 && state.selectedIndices.size === state.items.length;
 
         // Render header
         $('#data-thead').innerHTML = `
             <tr>
-                ${columns.map(k => `<th>${k === '_entity' ? 'Entity' : k}</th>`).join('')}
+                <th class="checkbox-cell">
+                    <input type="checkbox" id="select-all" ${allSelected ? 'checked' : ''} title="Select all">
+                </th>
+                ${['_entity', ...sortedKeys].map(k => `<th>${k === '_entity' ? 'Entity' : k}</th>`).join('')}
             </tr>
         `;
 
@@ -649,8 +691,13 @@
                 </tr>
             `;
         } else {
-            $('#data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType }, idx) => `
-                <tr data-index="${idx}">
+            $('#data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType }, idx) => {
+                const isSelected = state.selectedIndices.has(idx);
+                return `
+                <tr data-index="${idx}" class="${isSelected ? 'selected' : ''}">
+                    <td class="checkbox-cell" onclick="event.stopPropagation()">
+                        <input type="checkbox" class="row-select" data-index="${idx}" ${isSelected ? 'checked' : ''}>
+                    </td>
                     <td><span class="entity-badge" data-entity="${entityType || 'unknown'}">${entityType || '?'}</span></td>
                     ${sortedKeys.map(k => {
                         const val = item[k];
@@ -659,12 +706,101 @@
                         return `<td class="${isKey ? 'key-cell' : ''}" title="${escapeHtml(JSON.stringify(val))}">${display}</td>`;
                     }).join('')}
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         // Update count and load more button
         $('#item-count').textContent = `${state.items.length} items`;
         $('#btn-load-more').style.display = state.lastKey ? 'inline-block' : 'none';
+        
+        // Update selection UI
+        updateSelectionUI();
+    }
+    
+    // Update selection UI (bulk actions bar, count, etc.)
+    function updateSelectionUI() {
+        const bar = $('#bulk-actions-bar');
+        const count = state.selectedIndices.size;
+        
+        if (count > 0) {
+            bar.style.display = 'flex';
+            $('#selection-count').textContent = `${count} selected`;
+        } else {
+            bar.style.display = 'none';
+        }
+    }
+    
+    // Toggle selection of a single row
+    function toggleRowSelection(idx, selected) {
+        if (selected) {
+            state.selectedIndices.add(idx);
+        } else {
+            state.selectedIndices.delete(idx);
+        }
+        
+        // Update row class
+        const row = $(`tr[data-index="${idx}"]`);
+        if (row) {
+            row.classList.toggle('selected', selected);
+        }
+        
+        // Update select-all checkbox state
+        const selectAll = $('#select-all');
+        if (selectAll) {
+            const allSelected = state.items.length > 0 && state.selectedIndices.size === state.items.length;
+            selectAll.checked = allSelected;
+            selectAll.indeterminate = state.selectedIndices.size > 0 && !allSelected;
+        }
+        
+        updateSelectionUI();
+    }
+    
+    // Select/deselect all
+    function toggleSelectAll(selected) {
+        state.selectedIndices.clear();
+        if (selected) {
+            state.items.forEach((_, idx) => state.selectedIndices.add(idx));
+        }
+        renderData();
+    }
+    
+    // Clear selection
+    function clearSelection() {
+        state.selectedIndices.clear();
+        renderData();
+    }
+    
+    // Bulk delete selected items
+    async function bulkDeleteSelected() {
+        if (state.selectedIndices.size === 0) return;
+        
+        const count = state.selectedIndices.size;
+        if (!confirm(`Are you sure you want to delete ${count} item(s)?`)) {
+            return;
+        }
+        
+        const schema = state.currentSchema;
+        const pkName = schema.table.partitionKey.name;
+        const skName = schema.table.sortKey?.name;
+        
+        // Collect keys to delete
+        const keys = [];
+        for (const idx of state.selectedIndices) {
+            const item = state.items[idx];
+            const key = { pk: String(item[pkName]) };
+            if (skName && item[skName] !== undefined) {
+                key.sk = String(item[skName]);
+            }
+            keys.push(key);
+        }
+        
+        try {
+            await api.post(`/tables/${state.currentTable}/items/bulk-delete`, { keys });
+            state.selectedIndices.clear();
+            await loadData();
+        } catch (err) {
+            alert('Bulk delete failed: ' + err.message);
+        }
     }
 
     // Format a value for display
@@ -854,19 +990,170 @@
         }
     }
 
-    // Render query results
+    // Render query results using table view (similar to scan)
     function renderQueryResults(items) {
-        const container = $('#query-results-container');
+        state.queryItems = items;
+        state.selectedQueryIndices.clear();
         
+        const schema = state.currentSchema;
+        const pkName = schema.table.partitionKey.name;
+        const skName = schema.table.sortKey?.name;
+
+        // Pre-compute entity types for all items
+        const itemsWithEntity = items.map(item => ({
+            item,
+            entityType: detectEntityType(item, schema)
+        }));
+
+        // Get all unique keys from items
+        const allKeys = new Set();
+        items.forEach(item => {
+            Object.keys(item).forEach(k => allKeys.add(k));
+        });
+
+        // Sort keys: pk first, sk second, then alphabetically
+        const sortedKeys = Array.from(allKeys).sort((a, b) => {
+            if (a === pkName) return -1;
+            if (b === pkName) return 1;
+            if (a === skName) return -1;
+            if (b === skName) return 1;
+            return a.localeCompare(b);
+        });
+
+        // Check if all items are selected
+        const allSelected = items.length > 0 && state.selectedQueryIndices.size === items.length;
+
+        // Render header
+        $('#query-data-thead').innerHTML = `
+            <tr>
+                <th class="checkbox-cell">
+                    <input type="checkbox" id="query-select-all" ${allSelected ? 'checked' : ''} title="Select all">
+                </th>
+                ${['_entity', ...sortedKeys].map(k => `<th>${k === '_entity' ? 'Entity' : k}</th>`).join('')}
+            </tr>
+        `;
+
+        // Render rows
         if (items.length === 0) {
-            container.innerHTML = '<p class="placeholder">No items found</p>';
-            return;
+            $('#query-data-tbody').innerHTML = `
+                <tr>
+                    <td colspan="${sortedKeys.length + 2}" class="empty-state">
+                        No items found
+                    </td>
+                </tr>
+            `;
+        } else {
+            $('#query-data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType }, idx) => {
+                const isSelected = state.selectedQueryIndices.has(idx);
+                return `
+                <tr data-query-index="${idx}" class="${isSelected ? 'selected' : ''}">
+                    <td class="checkbox-cell" onclick="event.stopPropagation()">
+                        <input type="checkbox" class="query-row-select" data-index="${idx}" ${isSelected ? 'checked' : ''}>
+                    </td>
+                    <td><span class="entity-badge" data-entity="${entityType || 'unknown'}">${entityType || '?'}</span></td>
+                    ${sortedKeys.map(k => {
+                        const val = item[k];
+                        const isKey = k === pkName || k === skName;
+                        const display = formatValue(val);
+                        return `<td class="${isKey ? 'key-cell' : ''}" title="${escapeHtml(JSON.stringify(val))}">${display}</td>`;
+                    }).join('')}
+                </tr>
+            `}).join('');
         }
 
-        container.innerHTML = `
-            <p>${items.length} item(s) found</p>
-            <div class="json-display">${escapeHtml(JSON.stringify(items, null, 2))}</div>
-        `;
+        // Update count
+        $('#query-item-count').textContent = `(${items.length} item${items.length !== 1 ? 's' : ''})`;
+        
+        // Update selection UI
+        updateQuerySelectionUI();
+    }
+    
+    // Update query selection UI (bulk actions bar, count, etc.)
+    function updateQuerySelectionUI() {
+        const bar = $('#query-bulk-actions-bar');
+        const count = state.selectedQueryIndices.size;
+        
+        if (count > 0) {
+            bar.style.display = 'flex';
+            $('#query-selection-count').textContent = `${count} selected`;
+        } else {
+            bar.style.display = 'none';
+        }
+    }
+    
+    // Toggle selection of a single query row
+    function toggleQueryRowSelection(idx, selected) {
+        if (selected) {
+            state.selectedQueryIndices.add(idx);
+        } else {
+            state.selectedQueryIndices.delete(idx);
+        }
+        
+        // Update row class
+        const row = $(`tr[data-query-index="${idx}"]`);
+        if (row) {
+            row.classList.toggle('selected', selected);
+        }
+        
+        // Update select-all checkbox state
+        const selectAll = $('#query-select-all');
+        if (selectAll) {
+            const allSelected = state.queryItems.length > 0 && state.selectedQueryIndices.size === state.queryItems.length;
+            selectAll.checked = allSelected;
+            selectAll.indeterminate = state.selectedQueryIndices.size > 0 && !allSelected;
+        }
+        
+        updateQuerySelectionUI();
+    }
+    
+    // Select/deselect all query rows
+    function toggleQuerySelectAll(selected) {
+        state.selectedQueryIndices.clear();
+        if (selected) {
+            state.queryItems.forEach((_, idx) => state.selectedQueryIndices.add(idx));
+        }
+        renderQueryResults(state.queryItems);
+    }
+    
+    // Clear query selection
+    function clearQuerySelection() {
+        state.selectedQueryIndices.clear();
+        renderQueryResults(state.queryItems);
+    }
+    
+    // Bulk delete selected query items
+    async function bulkDeleteQuerySelected() {
+        if (state.selectedQueryIndices.size === 0) return;
+        
+        const count = state.selectedQueryIndices.size;
+        if (!confirm(`Are you sure you want to delete ${count} item(s)?`)) {
+            return;
+        }
+        
+        const schema = state.currentSchema;
+        const pkName = schema.table.partitionKey.name;
+        const skName = schema.table.sortKey?.name;
+        
+        // Collect keys to delete
+        const keys = [];
+        for (const idx of state.selectedQueryIndices) {
+            const item = state.queryItems[idx];
+            const key = { pk: String(item[pkName]) };
+            if (skName && item[skName] !== undefined) {
+                key.sk = String(item[skName]);
+            }
+            keys.push(key);
+        }
+        
+        try {
+            await api.post(`/tables/${state.currentTable}/items/bulk-delete`, { keys });
+            // Remove deleted items from queryItems and re-render
+            const remainingItems = state.queryItems.filter((_, idx) => !state.selectedQueryIndices.has(idx));
+            state.selectedQueryIndices.clear();
+            renderQueryResults(remainingItems);
+        } catch (err) {
+            alert('Bulk delete failed: ' + err.message);
+        }
     }
 
     // Setup event listeners
@@ -892,35 +1179,105 @@
 
         // Tabs
         $$('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
+            tab.addEventListener('click', async () => {
                 const tabName = tab.dataset.tab;
                 $$('.tab').forEach(t => t.classList.remove('active'));
                 $$('.tab-content').forEach(c => c.classList.remove('active'));
                 tab.classList.add('active');
                 $(`#tab-${tabName}`).classList.add('active');
+                
+                // Auto-load data when switching to scan tab if not loaded yet
+                if (tabName === 'data' && state.currentTable && state.items.length === 0) {
+                    await loadData();
+                }
             });
         });
 
         // Refresh button
-        $('#btn-refresh').addEventListener('click', () => loadData());
+        $('#btn-refresh').addEventListener('click', () => {
+            state.selectedIndices.clear();
+            loadData();
+        });
 
         // New item button
         $('#btn-new-item').addEventListener('click', () => openItemModal(null, true));
 
         // Page limit change
-        $('#page-limit').addEventListener('change', () => loadData());
+        $('#page-limit').addEventListener('change', () => {
+            state.selectedIndices.clear();
+            loadData();
+        });
 
         // Load more button
         $('#btn-load-more').addEventListener('click', () => loadData(true));
 
-        // Row click to edit
+        // Row click to edit (excluding checkbox cell)
         $('#data-tbody').addEventListener('click', (e) => {
+            // Don't trigger edit if clicking checkbox
+            if (e.target.classList.contains('row-select') || e.target.closest('.checkbox-cell')) {
+                return;
+            }
             const row = e.target.closest('tr[data-index]');
             if (row) {
                 const idx = parseInt(row.dataset.index);
                 openItemModal(state.items[idx]);
             }
         });
+        
+        // Query results row click to edit (excluding checkbox cell)
+        $('#query-data-tbody').addEventListener('click', (e) => {
+            // Don't trigger edit if clicking checkbox
+            if (e.target.classList.contains('query-row-select') || e.target.closest('.checkbox-cell')) {
+                return;
+            }
+            const row = e.target.closest('tr[data-query-index]');
+            if (row) {
+                const idx = parseInt(row.dataset.queryIndex);
+                openItemModal(state.queryItems[idx]);
+            }
+        });
+        
+        // Query row checkbox selection
+        $('#query-data-tbody').addEventListener('change', (e) => {
+            if (e.target.classList.contains('query-row-select')) {
+                const idx = parseInt(e.target.dataset.index);
+                toggleQueryRowSelection(idx, e.target.checked);
+            }
+        });
+        
+        // Query select all checkbox
+        $('#query-data-thead').addEventListener('change', (e) => {
+            if (e.target.id === 'query-select-all') {
+                toggleQuerySelectAll(e.target.checked);
+            }
+        });
+        
+        // Query bulk delete button
+        $('#btn-query-bulk-delete').addEventListener('click', bulkDeleteQuerySelected);
+        
+        // Query clear selection button
+        $('#btn-query-clear-selection').addEventListener('click', clearQuerySelection);
+        
+        // Row checkbox selection
+        $('#data-tbody').addEventListener('change', (e) => {
+            if (e.target.classList.contains('row-select')) {
+                const idx = parseInt(e.target.dataset.index);
+                toggleRowSelection(idx, e.target.checked);
+            }
+        });
+        
+        // Select all checkbox
+        $('#data-thead').addEventListener('change', (e) => {
+            if (e.target.id === 'select-all') {
+                toggleSelectAll(e.target.checked);
+            }
+        });
+        
+        // Bulk delete button
+        $('#btn-bulk-delete').addEventListener('click', bulkDeleteSelected);
+        
+        // Clear selection button
+        $('#btn-clear-selection').addEventListener('click', clearSelection);
 
         // Modal close buttons
         $$('.modal-close').forEach(btn => {

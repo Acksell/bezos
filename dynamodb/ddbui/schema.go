@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 	"gopkg.in/yaml.v3"
 )
@@ -43,6 +44,25 @@ type EntitySchema struct {
 	Fields              []FieldSchema    `yaml:"fields" json:"fields"`
 	GSIMappings         []GSIMappingYAML `yaml:"gsiMappings,omitempty" json:"gsiMappings,omitempty"`
 	IsVersioned         bool             `yaml:"isVersioned,omitempty" json:"isVersioned,omitempty"`
+
+	// Parsed pattern info for UI - populated at load time, not from YAML
+	PartitionKeyParsed *ParsedPattern `yaml:"-" json:"partitionKeyParsed,omitempty"`
+	SortKeyParsed      *ParsedPattern `yaml:"-" json:"sortKeyParsed,omitempty"`
+}
+
+// ParsedPattern represents a parsed key pattern with its parts.
+// This allows the UI to build keys without parsing patterns itself.
+type ParsedPattern struct {
+	Parts []PatternPart `json:"parts"`
+}
+
+// PatternPart is either a literal string or a variable reference.
+type PatternPart struct {
+	IsLiteral  bool     `json:"isLiteral"`
+	Value      string   `json:"value"`                // literal value or variable name
+	Formats    []string `json:"formats,omitempty"`    // format modifiers for variables
+	PrintfSpec string   `json:"printfSpec,omitempty"` // printf spec for variables
+	FieldType  string   `json:"fieldType,omitempty"`  // Go type of the field (from entity fields)
 }
 
 // FieldSchema describes an entity field.
@@ -99,10 +119,15 @@ func LoadSchemas(files []string) (*LoadedSchema, error) {
 		}
 	}
 
-	// Convert to table definitions
+	// Convert to table definitions and parse patterns
 	for _, sf := range schema.Tables {
 		def := toTableDefinition(sf)
 		schema.TableDefinitions = append(schema.TableDefinitions, def)
+
+		// Parse key patterns for each entity
+		for i := range sf.Entities {
+			parseEntityPatterns(&sf.Entities[i])
+		}
 	}
 
 	return schema, nil
@@ -188,4 +213,52 @@ func toKeyKind(kind string) table.KeyKind {
 	default:
 		return table.KeyKindS
 	}
+}
+
+// parseEntityPatterns parses the partition and sort key patterns for an entity
+// and populates the parsed pattern fields.
+func parseEntityPatterns(entity *EntitySchema) {
+	// Build a map of field tag -> field type for resolving variable types
+	fieldTypes := make(map[string]string)
+	for _, f := range entity.Fields {
+		fieldTypes[f.Tag] = f.Type
+	}
+
+	if entity.PartitionKeyPattern != "" {
+		entity.PartitionKeyParsed = parsePattern(entity.PartitionKeyPattern, fieldTypes)
+	}
+	if entity.SortKeyPattern != "" {
+		entity.SortKeyParsed = parsePattern(entity.SortKeyPattern, fieldTypes)
+	}
+}
+
+// parsePattern parses a key pattern string into a ParsedPattern using the val package.
+func parsePattern(pattern string, fieldTypes map[string]string) *ParsedPattern {
+	spec, err := val.ParseFmt(pattern)
+	if err != nil {
+		// If parsing fails, return a single literal part with the whole pattern
+		return &ParsedPattern{
+			Parts: []PatternPart{{IsLiteral: true, Value: pattern}},
+		}
+	}
+
+	parts := make([]PatternPart, len(spec.Parts))
+	for i, p := range spec.Parts {
+		parts[i] = PatternPart{
+			IsLiteral:  p.IsLiteral,
+			Value:      p.Value,
+			Formats:    p.Formats,
+			PrintfSpec: p.PrintfSpec,
+		}
+		// For variables, look up the field type
+		if !p.IsLiteral {
+			// The value might be a dotted path like "user.id", use just the field name
+			fieldName := p.Value
+			if ft, ok := fieldTypes[fieldName]; ok {
+				parts[i].FieldType = ft
+			}
+		}
+	}
+
+	return &ParsedPattern{Parts: parts}
 }

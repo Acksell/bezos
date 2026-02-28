@@ -38,6 +38,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tables/{table}/items/{pk}/{sk}", h.getItemWithSK)
 	mux.HandleFunc("DELETE /api/tables/{table}/items/{pk}", h.deleteItem)
 	mux.HandleFunc("DELETE /api/tables/{table}/items/{pk}/{sk}", h.deleteItemWithSK)
+	mux.HandleFunc("POST /api/tables/{table}/items/bulk-delete", h.bulkDeleteItems)
 	mux.HandleFunc("POST /api/tables/{table}/query", h.queryItems)
 	mux.HandleFunc("POST /api/tables/{table}/gsi/{gsi}/query", h.queryGSI)
 }
@@ -189,6 +190,70 @@ func (h *APIHandler) doDeleteItem(w http.ResponseWriter, r *http.Request, tableN
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// BulkDeleteRequest is the JSON request body for bulk delete.
+type BulkDeleteRequest struct {
+	Keys []BulkDeleteKey `json:"keys"`
+}
+
+// BulkDeleteKey represents a single key to delete.
+type BulkDeleteKey struct {
+	PK string `json:"pk"`
+	SK string `json:"sk,omitempty"`
+}
+
+// bulkDeleteItems deletes multiple items in a single request.
+func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
+	tableName := r.PathValue("table")
+	sf, ok := h.schema.Tables[tableName]
+	if !ok {
+		writeError(w, http.StatusNotFound, "table not found: "+tableName)
+		return
+	}
+
+	var req BulkDeleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if len(req.Keys) == 0 {
+		writeError(w, http.StatusBadRequest, "no keys provided")
+		return
+	}
+
+	if len(req.Keys) > 25 {
+		writeError(w, http.StatusBadRequest, "maximum 25 items per bulk delete")
+		return
+	}
+
+	// Build batch write request
+	writeRequests := make([]types.WriteRequest, len(req.Keys))
+	for i, k := range req.Keys {
+		key := buildKey(sf, k.PK, k.SK)
+		writeRequests[i] = types.WriteRequest{
+			DeleteRequest: &types.DeleteRequest{
+				Key: key,
+			},
+		}
+	}
+
+	input := &dynamodb.BatchWriteItemInput{
+		RequestItems: map[string][]types.WriteRequest{
+			tableName: writeRequests,
+		},
+	}
+
+	_, err := h.store.BatchWriteItem(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "bulk delete failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted": len(req.Keys),
+	})
 }
 
 // PutItemRequest is the JSON request body for putting an item.

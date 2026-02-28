@@ -58,6 +58,11 @@
                             </select>
                         </div>
                     </div>
+                    <div id="bulk-actions-bar" class="bulk-actions-bar" style="display: none;">
+                        <span id="selection-count">0 selected</span>
+                        <button id="btn-bulk-delete" class="btn btn-danger btn-sm">Delete Selected</button>
+                        <button id="btn-clear-selection" class="btn btn-secondary btn-sm">Clear Selection</button>
+                    </div>
                     <div class="data-container">
                         <table class="data-table">
                             <thead id="data-thead">
@@ -144,9 +149,22 @@
                     </details>
                     
                     <div class="query-results">
-                        <h3>Results</h3>
+                        <h3>Results <span id="query-item-count"></span></h3>
+                        <div id="query-bulk-actions-bar" class="bulk-actions-bar" style="display: none;">
+                            <span id="query-selection-count">0 selected</span>
+                            <button id="btn-query-bulk-delete" class="btn btn-danger btn-sm">Delete Selected</button>
+                            <button id="btn-query-clear-selection" class="btn btn-secondary btn-sm">Clear Selection</button>
+                        </div>
                         <div id="query-results-container">
-                            <p class="placeholder">Run a query to see results</p>
+                            <div class="data-container">
+                                <table class="data-table">
+                                    <thead id="query-data-thead">
+                                    </thead>
+                                    <tbody id="query-data-tbody">
+                                        <tr><td class="empty-state">Run a query to see results</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
