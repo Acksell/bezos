@@ -2,7 +2,9 @@ package ddbgen
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -83,7 +85,7 @@ func Discover(dir string) (*DiscoverResult, error) {
 	scope := pkg.Types.Scope()
 	type indexWithPos struct {
 		idx IndexVar
-		pos int // source position for stable ordering
+		pos token.Position // resolved file:line position for stable ordering
 	}
 	var found []indexWithPos
 	for _, name := range scope.Names() {
@@ -108,7 +110,7 @@ func Discover(dir string) (*DiscoverResult, error) {
 			EntityType:  entityType,
 			IsVersioned: implementsVersionedEntity(pkg.Types, entityType),
 		}
-		found = append(found, indexWithPos{idx: idx, pos: int(v.Pos())})
+		found = append(found, indexWithPos{idx: idx, pos: pkg.Fset.Position(v.Pos())})
 
 		// Extract entity field information
 		if _, exists := result.EntityFields[entityType]; !exists {
@@ -117,9 +119,15 @@ func Discover(dir string) (*DiscoverResult, error) {
 		}
 	}
 
-	// Sort by source position for deterministic output order
+	// Sort by filename then line number for deterministic output order.
+	// Using raw token.Pos is NOT stable when indexes span multiple files,
+	// because go/packages may assign different file base offsets across runs.
 	sort.Slice(found, func(i, j int) bool {
-		return found[i].pos < found[j].pos
+		fi, fj := filepath.Base(found[i].pos.Filename), filepath.Base(found[j].pos.Filename)
+		if fi != fj {
+			return fi < fj
+		}
+		return found[i].pos.Line < found[j].pos.Line
 	})
 	for _, f := range found {
 		result.Indexes = append(result.Indexes, f.idx)
