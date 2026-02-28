@@ -803,6 +803,75 @@
         }
     }
 
+    // Convert items to CSV string
+    function itemsToCSV(items) {
+        if (items.length === 0) return '';
+        
+        // Get all unique keys from items
+        const allKeys = new Set();
+        items.forEach(item => {
+            Object.keys(item).forEach(k => allKeys.add(k));
+        });
+        const columns = Array.from(allKeys).sort();
+        
+        // Helper to escape CSV values
+        const escapeCSV = (val) => {
+            if (val === null || val === undefined) return '';
+            const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+            // Escape quotes and wrap in quotes if contains comma, quote, or newline
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                return '"' + str.replace(/"/g, '""') + '"';
+            }
+            return str;
+        };
+        
+        // Build CSV
+        const header = columns.map(escapeCSV).join(',');
+        const rows = items.map(item => 
+            columns.map(col => escapeCSV(item[col])).join(',')
+        );
+        
+        return [header, ...rows].join('\n');
+    }
+
+    // Download CSV file
+    function downloadCSV(csv, filename) {
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+
+    // Export selected items to CSV (scan view)
+    function exportSelectedToCSV() {
+        if (state.selectedIndices.size === 0) return;
+        
+        const selectedItems = [];
+        for (const idx of state.selectedIndices) {
+            selectedItems.push(state.items[idx]);
+        }
+        
+        const csv = itemsToCSV(selectedItems);
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+        downloadCSV(csv, `${state.currentTable}_export_${timestamp}.csv`);
+    }
+
+    // Export selected query items to CSV
+    function exportQuerySelectedToCSV() {
+        if (state.selectedQueryIndices.size === 0) return;
+        
+        const selectedItems = [];
+        for (const idx of state.selectedQueryIndices) {
+            selectedItems.push(state.queryItems[idx]);
+        }
+        
+        const csv = itemsToCSV(selectedItems);
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
+        downloadCSV(csv, `${state.currentTable}_query_export_${timestamp}.csv`);
+    }
+
     // Format a value for display
     function formatValue(val) {
         if (val === null || val === undefined) {
@@ -1255,6 +1324,9 @@
         // Query bulk delete button
         $('#btn-query-bulk-delete').addEventListener('click', bulkDeleteQuerySelected);
         
+        // Query export CSV button
+        $('#btn-query-export-csv').addEventListener('click', exportQuerySelectedToCSV);
+        
         // Query clear selection button
         $('#btn-query-clear-selection').addEventListener('click', clearQuerySelection);
         
@@ -1275,6 +1347,9 @@
         
         // Bulk delete button
         $('#btn-bulk-delete').addEventListener('click', bulkDeleteSelected);
+        
+        // Export CSV button
+        $('#btn-export-csv').addEventListener('click', exportSelectedToCSV);
         
         // Clear selection button
         $('#btn-clear-selection').addEventListener('click', clearSelection);
