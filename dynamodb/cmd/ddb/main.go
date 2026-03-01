@@ -11,22 +11,24 @@
 //
 // # Quick Start
 //
-//	# Add to your entity package:
+// Register indexes with indices.Add and add a go:generate directive:
+//
 //	//go:generate ddb gen
 //
-//	# Generate code and schema files:
+//	var _ = indices.Add(index.PrimaryIndex[User]{...})
+//
+// Generate code and schema files:
+//
 //	go generate ./...
 //
-//	# Start the UI:
+// Or regenerate all packages from CLI:
+//
+//	ddb gen
+//
+// Start the UI:
+//
 //	ddb ui --db ./data
-//	ddb ui --memory  # in-memory, no persistence
-//
-// # Configuration (optional)
-//
-// Create a ddb.ui.yaml file in your project root for UI defaults:
-//
-//	dataDir: ./data    # database directory
-//	port: 3070         # UI server port
+//	ddb ui --memory
 package main
 
 import (

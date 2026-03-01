@@ -3,13 +3,12 @@ package ddbgen
 import "github.com/acksell/bezos/dynamodb/index/val"
 
 // =============================================================================
-// Loader output types (JSON-serialized from the loader sidecar)
+// Index info types (used by code generation)
 // =============================================================================
 
-// indexInfo holds the runtime data extracted from a PrimaryIndex variable by
-// the loader sidecar. It combines the static metadata from Phase 1 (discover)
-// with the runtime values obtained by executing user code.
-type indexInfo struct {
+// IndexInfo holds the data extracted from a PrimaryIndex variable.
+// Used by code generation to build type-safe accessor functions.
+type IndexInfo struct {
 	VarName      string      `json:"varName"`
 	EntityType   string      `json:"entityType"`
 	TableName    string      `json:"tableName"`
@@ -17,13 +16,13 @@ type indexInfo struct {
 	SKDefName    string      `json:"skDefName"`
 	PartitionKey val.ValDef  `json:"partitionKey"`
 	SortKey      *val.ValDef `json:"sortKey,omitempty"`
-	GSIs         []gsiInfo   `json:"gsis,omitempty"`
+	GSIs         []GSIInfo   `json:"gsis,omitempty"`
 	IsVersioned  bool        `json:"isVersioned"`
-	Fields       []fieldInfo `json:"fields"`
+	Fields       []FieldInfo `json:"fields"`
 }
 
-// gsiInfo holds runtime GSI data extracted from a SecondaryIndex.
-type gsiInfo struct {
+// GSIInfo holds GSI data extracted from a SecondaryIndex.
+type GSIInfo struct {
 	Name      string      `json:"name"`
 	Index     int         `json:"index"`
 	PKDef     string      `json:"pkDef"`
@@ -32,8 +31,8 @@ type gsiInfo struct {
 	SKPattern *val.ValDef `json:"skPattern,omitempty"`
 }
 
-// fieldInfo mirrors discover.FieldInfo but with JSON tags for serialization.
-type fieldInfo struct {
+// FieldInfo holds metadata about an entity struct field.
+type FieldInfo struct {
 	Name string `json:"name"`
 	Tag  string `json:"tag"`
 	Type string `json:"type"`

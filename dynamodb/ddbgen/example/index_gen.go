@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/acksell/bezos/dynamodb/ddbsdk"
 	"github.com/acksell/bezos/dynamodb/index"
+	"github.com/acksell/bezos/dynamodb/index/indices"
 	"github.com/acksell/bezos/dynamodb/table"
 	"strconv"
 	"time"
@@ -21,7 +22,8 @@ type UserIndexUtil struct {
 }
 
 // UserIndex is the typed wrapper for User operations.
-var UserIndex = UserIndexUtil{PrimaryIndex: &userIndex}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var UserIndex UserIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
@@ -120,7 +122,8 @@ type UserIndexGSI1Util struct {
 }
 
 // UserIndexGSI1 is the query-only wrapper for the GSI1 GSI.
-var UserIndexGSI1 = UserIndexGSI1Util{primary: &UserIndex}
+// Initialized in init() to ensure index vars are populated first.
+var UserIndexGSI1 UserIndexGSI1Util
 
 // UserGSI1Query is a query builder for the GSI1 GSI.
 type UserGSI1Query struct {
@@ -184,7 +187,8 @@ type OrderIndexUtil struct {
 }
 
 // OrderIndex is the typed wrapper for Order operations.
-var OrderIndex = OrderIndexUtil{PrimaryIndex: &orderIndex}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var OrderIndex OrderIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
@@ -289,7 +293,8 @@ type MessageIndexUtil struct {
 }
 
 // MessageIndex is the typed wrapper for Message operations.
-var MessageIndex = MessageIndexUtil{PrimaryIndex: &messageIndex}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var MessageIndex MessageIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx MessageIndexUtil) PrimaryKey(chatID string, sequenceNum int64) table.PrimaryKey {
@@ -394,7 +399,8 @@ type EventIndexUtil struct {
 }
 
 // EventIndex is the typed wrapper for Event operations.
-var EventIndex = EventIndexUtil{PrimaryIndex: &eventIndex}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var EventIndex EventIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx EventIndexUtil) PrimaryKey(eventID string, timestamp time.Time) table.PrimaryKey {
@@ -499,7 +505,8 @@ type RandomEntityIndexUtil struct {
 }
 
 // RandomEntityIndex is the typed wrapper for RandomEntity operations.
-var RandomEntityIndex = RandomEntityIndexUtil{PrimaryIndex: &randomIndex1}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var RandomEntityIndex RandomEntityIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
@@ -593,7 +600,8 @@ type RandomEntityIndexGSI1Util struct {
 }
 
 // RandomEntityIndexGSI1 is the query-only wrapper for the GSI1 GSI.
-var RandomEntityIndexGSI1 = RandomEntityIndexGSI1Util{primary: &RandomEntityIndex}
+// Initialized in init() to ensure index vars are populated first.
+var RandomEntityIndexGSI1 RandomEntityIndexGSI1Util
 
 // RandomEntityGSI1Query is a query builder for the GSI1 GSI.
 type RandomEntityGSI1Query struct {
@@ -645,4 +653,14 @@ func (q RandomEntityGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
 // IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
 func (q RandomEntityGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
 	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("SAME#" + id))
+}
+
+func init() {
+	UserIndex = UserIndexUtil{PrimaryIndex: indices.Get[User]()}
+	UserIndexGSI1 = UserIndexGSI1Util{primary: &UserIndex}
+	OrderIndex = OrderIndexUtil{PrimaryIndex: indices.Get[Order]()}
+	MessageIndex = MessageIndexUtil{PrimaryIndex: indices.Get[Message]()}
+	EventIndex = EventIndexUtil{PrimaryIndex: indices.Get[Event]()}
+	RandomEntityIndex = RandomEntityIndexUtil{PrimaryIndex: indices.Get[RandomEntity]()}
+	RandomEntityIndexGSI1 = RandomEntityIndexGSI1Util{primary: &RandomEntityIndex}
 }

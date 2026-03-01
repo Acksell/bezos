@@ -6,20 +6,25 @@
 //
 // # Usage
 //
-// Add a go:generate directive to your package that contains the index definitions.
+// Register your indexes using [indices.Add] and add a go:generate directive:
 //
 //	//go:generate ddb gen
 //
-//	var userIndex = index.PrimaryIndex[User]{
+//	var _ = indices.Add(index.PrimaryIndex[User]{
 //	    Table:        UserTable,
 //	    PartitionKey: val.Fmt("USER#{id}"),
 //	    SortKey:      val.Fmt("PROFILE").Ptr(),
-//	}
+//	})
 //
-// The generator will scan the package, discover index definitions,
-// and generate type-safe key constructors plus schema YAML files.
+// Running go generate will:
+//  1. Bootstrap gen/main.go if it doesn't exist
+//  2. Run gen/main.go which calls [Generate] to produce index_gen.go and schema/ files
 //
-// To generate code only (no schema files):
+// The gen/main.go file is persistent and can be committed to version control.
+// It imports your package (populating the indices registry via side-effect)
+// and then calls [Generate] with the appropriate options.
 //
-//	ddb gen --no-yaml
+// You can also run ddb gen from the CLI to regenerate all packages at once:
+//
+//	ddb gen
 package ddbgen

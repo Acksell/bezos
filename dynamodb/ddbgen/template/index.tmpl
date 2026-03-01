@@ -19,7 +19,8 @@ type {{$idx.Name}}IndexUtil struct {
 }
 
 // {{$idx.Name}}Index is the typed wrapper for {{$idx.Name}} operations.
-var {{$idx.Name}}Index = {{$idx.Name}}IndexUtil{PrimaryIndex: &{{$idx.IndexVarName}}}
+// Initialized in init() to ensure indices.Add() calls complete first.
+var {{$idx.Name}}Index {{$idx.Name}}IndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
 func (idx {{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKey {
@@ -175,7 +176,8 @@ type {{$idx.Name}}Index{{$gsi.Name}}Util struct {
 }
 
 // {{$idx.Name}}Index{{$gsi.Name}} is the query-only wrapper for the {{$gsi.Name}} GSI.
-var {{$idx.Name}}Index{{$gsi.Name}} = {{$idx.Name}}Index{{$gsi.Name}}Util{primary: &{{$idx.Name}}Index}
+// Initialized in init() to ensure index vars are populated first.
+var {{$idx.Name}}Index{{$gsi.Name}} {{$idx.Name}}Index{{$gsi.Name}}Util
 
 // {{$idx.Name}}{{$gsi.Name}}Query is a query builder for the {{$gsi.Name}} GSI.
 type {{$idx.Name}}{{$gsi.Name}}Query struct {
@@ -231,3 +233,12 @@ func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}LessThanOrEqua
 {{end}}
 {{end}}
 {{end}}
+
+func init() {
+{{- range $idx := .Indexes}}
+	{{$idx.Name}}Index = {{$idx.Name}}IndexUtil{PrimaryIndex: indices.Get[{{$idx.EntityType}}]()}
+{{- range $gsi := $idx.GSIs}}
+	{{$idx.Name}}Index{{$gsi.Name}} = {{$idx.Name}}Index{{$gsi.Name}}Util{primary: &{{$idx.Name}}Index}
+{{- end}}
+{{- end}}
+}

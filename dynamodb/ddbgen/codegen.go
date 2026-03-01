@@ -163,8 +163,8 @@ func sortKeyWarning(p val.SpecPart, fieldType string, entityType string) string 
 // Index data building
 // =============================================================================
 
-func buildIndexData(idx indexInfo) (indexData, error) {
-	tagMap := make(map[string]fieldInfo)
+func buildIndexData(idx IndexInfo) (indexData, error) {
+	tagMap := make(map[string]FieldInfo)
 	for _, f := range idx.Fields {
 		tagMap[f.Tag] = f
 	}
@@ -202,7 +202,7 @@ func buildIndexData(idx indexInfo) (indexData, error) {
 	return data, nil
 }
 
-func buildGSIData(gsi gsiInfo, tagMap map[string]fieldInfo, entityType string) (gsiData, error) {
+func buildGSIData(gsi GSIInfo, tagMap map[string]FieldInfo, entityType string) (gsiData, error) {
 	pkData, err := buildKeyData(gsi.PKPattern, tagMap, false, entityType)
 	if err != nil {
 		return gsiData{}, fmt.Errorf("partition key: %w", err)
@@ -226,7 +226,7 @@ func buildGSIData(gsi gsiInfo, tagMap map[string]fieldInfo, entityType string) (
 	return data, nil
 }
 
-func buildKeyData(vd val.ValDef, tagMap map[string]fieldInfo, isSortKey bool, entityType string) (keyData, error) {
+func buildKeyData(vd val.ValDef, tagMap map[string]FieldInfo, isSortKey bool, entityType string) (keyData, error) {
 	// Handle constant values
 	if vd.Const != nil {
 		kind := vd.Const.Kind
@@ -603,7 +603,8 @@ var tmplFuncs = template.FuncMap{
 }
 
 // generateCode transforms index info into Go source code using the index template.
-func generateCode(packageName string, indexes []indexInfo) ([]byte, error) {
+// GenerateCode transforms index info into Go source code using the index template.
+func GenerateCode(packageName string, indexes []IndexInfo) ([]byte, error) {
 	var idxDataList []indexData
 	needsFmt, needsStrconv, needsTime := false, false, false
 
@@ -627,6 +628,7 @@ func generateCode(packageName string, indexes []indexInfo) ([]byte, error) {
 	imports := []string{
 		`"github.com/acksell/bezos/dynamodb/ddbsdk"`,
 		`"github.com/acksell/bezos/dynamodb/index"`,
+		`"github.com/acksell/bezos/dynamodb/index/indices"`,
 		`"github.com/acksell/bezos/dynamodb/table"`,
 	}
 	if needsFmt {

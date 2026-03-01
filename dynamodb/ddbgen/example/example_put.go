@@ -1,3 +1,8 @@
+//go:build ignore
+
+// This file demonstrates usage of the generated code.
+// It's excluded from the build to avoid circular dependency during generation.
+
 package example
 
 import (

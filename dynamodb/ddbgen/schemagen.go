@@ -97,9 +97,9 @@ func valDefKind(vd val.ValDef) string {
 // Schema generation
 // =============================================================================
 
-func generateSchemaFiles(schemaDir string, indexes []indexInfo) error {
+func generateSchemaFiles(schemaDir string, indexes []IndexInfo) error {
 	// Group indexes by table, preserving discovery order
-	tableIndexes := make(map[string][]indexInfo)
+	tableIndexes := make(map[string][]IndexInfo)
 	var tableOrder []string
 	for _, idx := range indexes {
 		tableName := idx.TableName

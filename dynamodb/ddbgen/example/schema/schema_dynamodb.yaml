@@ -32,7 +32,7 @@ tables:
             type: string
           - name: UpdatedAt
             tag: updatedAt
-            type: Time
+            type: time.Time
         gsiMappings:
           - gsi: GSI1
             partitionPattern: EMAIL#{email}
@@ -82,7 +82,7 @@ tables:
             type: string
           - name: CreatedAt
             tag: createdAt
-            type: Time
+            type: time.Time
   - name: events
     partitionKey:
       name: pk
@@ -100,7 +100,7 @@ tables:
             type: string
           - name: Timestamp
             tag: timestamp
-            type: Time
+            type: time.Time
           - name: EventType
             tag: eventType
             type: string

@@ -1,16 +1,17 @@
 // Package example demonstrates how to use ddbgen with index definitions.
 //
-// Define indexes using PrimaryIndex with type parameters and string patterns.
-// Run the generator to produce type-safe key constructors:
-//
-//go:generate ddb gen
+// Define indexes using indices.Add to register PrimaryIndex definitions,
+// then run go generate to create gen/main.go and generate code.
 package example
+
+//go:generate ddb gen
 
 import (
 	"fmt"
 	"time"
 
 	"github.com/acksell/bezos/dynamodb/index"
+	"github.com/acksell/bezos/dynamodb/index/indices"
 	"github.com/acksell/bezos/dynamodb/index/val"
 	"github.com/acksell/bezos/dynamodb/table"
 )
@@ -32,7 +33,7 @@ var UserTable = table.TableDefinition{
 	},
 }
 
-var userIndex = index.PrimaryIndex[User]{
+var _ = indices.Add(index.PrimaryIndex[User]{
 	Table:        UserTable,
 	PartitionKey: val.Fmt("USER#{id}"),
 	SortKey:      val.Fmt("PROFILE").Ptr(),
@@ -43,7 +44,7 @@ var userIndex = index.PrimaryIndex[User]{
 			Sort:      val.Fmt("USER#{id}").Ptr(),
 		},
 	},
-}
+})
 
 var OrderTable = table.TableDefinition{
 	Name: "orders",
@@ -53,11 +54,11 @@ var OrderTable = table.TableDefinition{
 	},
 }
 
-var orderIndex = index.PrimaryIndex[Order]{
+var _ = indices.Add(index.PrimaryIndex[Order]{
 	Table:        OrderTable,
 	PartitionKey: val.Fmt("TENANT#{tenantID}"),
 	SortKey:      val.Fmt("ORDER#{orderID}").Ptr(),
-}
+})
 
 // MessageTable demonstrates using int64 fields in keys
 var MessageTable = table.TableDefinition{
@@ -68,12 +69,12 @@ var MessageTable = table.TableDefinition{
 	},
 }
 
-// messageIndex demonstrates int64 in sort key with warning
-var messageIndex = index.PrimaryIndex[Message]{
+// _ = indices.Add demonstrates int64 in sort key with warning
+var _ = indices.Add(index.PrimaryIndex[Message]{
 	Table:        MessageTable,
 	PartitionKey: val.Fmt("CHAT#{chatID}"),
 	SortKey:      val.Fmt("MSG#{sequenceNum}").Ptr(), // int64 without padding - should warn
-}
+})
 
 // EventTable demonstrates time.Time keys
 var EventTable = table.TableDefinition{
@@ -93,12 +94,12 @@ type Event struct {
 
 func (e *Event) IsValid() error { return nil }
 
-// eventIndex demonstrates time.Time in sort key with unixnano format (padded)
-var eventIndex = index.PrimaryIndex[Event]{
+// _ = indices.Add demonstrates time.Time in sort key with unixnano format (padded)
+var _ = indices.Add(index.PrimaryIndex[Event]{
 	Table:        EventTable,
 	PartitionKey: val.Fmt("EVENT#{eventID}"),
 	SortKey:      val.Fmt("EVENT#{timestamp:unixnano:%020d}").Ptr(), // padded - no warning
-}
+})
 
 var SingleTable = table.TableDefinition{
 	Name: "single-table",
@@ -129,7 +130,7 @@ func (e RandomEntity) IsValid() error {
 }
 
 // TODO support index.PrimaryIndex[User] on SingleTable - i.e. support an entity on different tables, useful for table migrations.
-var randomIndex1 = index.PrimaryIndex[RandomEntity]{
+var _ = indices.Add(index.PrimaryIndex[RandomEntity]{
 	Table:        SingleTable,
 	PartitionKey: val.Fmt("world"),
 	SortKey:      val.Bytes("SGVsbG8=").Ptr(),
@@ -140,4 +141,4 @@ var randomIndex1 = index.PrimaryIndex[RandomEntity]{
 			Sort:      val.Fmt("SAME#{id}").Ptr(),
 		},
 	},
-}
+})
