@@ -9,173 +9,9 @@ import (
 	"github.com/acksell/bezos/dynamodb/index/indices"
 	"github.com/acksell/bezos/dynamodb/table"
 	"strconv"
+	"sync"
 	"time"
 )
-
-// =============================================================================
-// User Index Wrapper
-// =============================================================================
-
-// UserIndexUtil wraps the PrimaryIndex with strongly-typed methods.
-type UserIndexUtil struct {
-	*index.PrimaryIndex[User]
-}
-
-// UserIndex is the typed wrapper for User operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
-var UserIndex UserIndexUtil
-
-// PrimaryKey creates a primary key from explicit parameters.
-func (idx UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
-	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
-		Values: table.PrimaryKeyValues{
-			PartitionKey: "USER#" + id,
-			SortKey:      "PROFILE",
-		},
-	}
-}
-
-// PrimaryKeyFrom creates the primary key from a User entity.
-func (idx UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
-	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
-		Values: table.PrimaryKeyValues{
-			PartitionKey: "USER#" + e.UserID,
-			SortKey:      "PROFILE",
-		},
-	}
-}
-
-// GSIKeysFrom creates all GSI keys from a User entity.
-func (idx UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
-	return []table.PrimaryKey{
-		{
-			Definition: idx.Secondary[0].KeyDefinition(),
-			Values: table.PrimaryKeyValues{
-				PartitionKey: "EMAIL#" + e.Email,
-				SortKey:      "USER#" + e.UserID,
-			},
-		},
-	}
-}
-
-// UnsafePut creates a Put operation without optimistic locking.
-func (idx UserIndexUtil) UnsafePut(e *User) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
-}
-
-// SafePut creates a Put operation with optimistic locking.
-func (idx UserIndexUtil) SafePut(e *User) *ddbsdk.PutWithCondition {
-	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
-}
-
-// Delete creates a Delete operation.
-func (idx UserIndexUtil) Delete(id string) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(id))
-}
-
-// UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx UserIndexUtil) UnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(id))
-}
-
-// GSI1Key creates a key for querying the GSI1 GSI.
-func (idx UserIndexUtil) GSI1Key(email string, id string) table.PrimaryKey {
-	return table.PrimaryKey{
-		Definition: idx.Secondary[0].KeyDefinition(),
-		Values: table.PrimaryKeyValues{
-			PartitionKey: "EMAIL#" + email,
-			SortKey:      "USER#" + id,
-		},
-	}
-}
-
-// -------------------------------------------------------------------------
-// Primary Index Query Builder
-// -------------------------------------------------------------------------
-
-// UserPrimaryQuery is a query builder for the primary index.
-type UserPrimaryQuery struct {
-	idx *UserIndexUtil
-	qd  ddbsdk.QueryDef
-}
-
-// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
-func (q UserPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
-
-// QueryPartition creates a query for the given partition key on the primary index.
-func (idx UserIndexUtil) QueryPartition(id string) UserPrimaryQuery {
-	return UserPrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "USER#"+id),
-	}
-}
-
-// -------------------------------------------------------------------------
-// UserIndexGSI1 - Query-only GSI Wrapper
-// -------------------------------------------------------------------------
-
-// UserIndexGSI1Util provides query methods for the GSI1 GSI.
-type UserIndexGSI1Util struct {
-	primary *UserIndexUtil
-}
-
-// UserIndexGSI1 is the query-only wrapper for the GSI1 GSI.
-// Initialized in init() to ensure index vars are populated first.
-var UserIndexGSI1 UserIndexGSI1Util
-
-// UserGSI1Query is a query builder for the GSI1 GSI.
-type UserGSI1Query struct {
-	idx *UserIndexGSI1Util
-	qd  ddbsdk.QueryDef
-}
-
-// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
-func (q UserGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
-
-// QueryPartition creates a query for the given partition key on the GSI1 GSI.
-func (idx UserIndexGSI1Util) QueryPartition(email string) UserGSI1Query {
-	return UserGSI1Query{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.primary.Table, "EMAIL#"+email).OnIndex("GSI1"),
-	}
-}
-
-// IdEquals adds a sort key equals condition and returns the final QueryDef.
-func (q UserGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Equals("USER#" + id))
-}
-
-// IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
-func (q UserGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.BeginsWith("USER#" + prefix))
-}
-
-// IdBetween adds a sort key between condition and returns the final QueryDef.
-func (q UserGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.Between("USER#"+idStart, "USER#"+idEnd))
-}
-
-// IdGreaterThan adds a sort key > condition and returns the final QueryDef.
-func (q UserGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThan("USER#" + id))
-}
-
-// IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
-func (q UserGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("USER#" + id))
-}
-
-// IdLessThan adds a sort key < condition and returns the final QueryDef.
-func (q UserGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThan("USER#" + id))
-}
-
-// IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
-func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
-	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("USER#" + id))
-}
 
 // =============================================================================
 // Order Index Wrapper
@@ -183,17 +19,23 @@ func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
 
 // OrderIndexUtil wraps the PrimaryIndex with strongly-typed methods.
 type OrderIndexUtil struct {
-	*index.PrimaryIndex[Order]
+	o  sync.Once
+	pi *index.PrimaryIndex[Order]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *OrderIndexUtil) Definition() *index.PrimaryIndex[Order] {
+	idx.o.Do(func() { idx.pi = indices.Get[Order]() })
+	return idx.pi
 }
 
 // OrderIndex is the typed wrapper for Order operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
 var OrderIndex OrderIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
-func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
+func (idx *OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "TENANT#" + tenantID,
 			SortKey:      "ORDER#" + orderID,
@@ -202,9 +44,9 @@ func (idx OrderIndexUtil) PrimaryKey(tenantID string, orderID string) table.Prim
 }
 
 // PrimaryKeyFrom creates the primary key from a Order entity.
-func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
+func (idx *OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "TENANT#" + e.TenantID,
 			SortKey:      "ORDER#" + e.OrderID,
@@ -213,18 +55,18 @@ func (idx OrderIndexUtil) PrimaryKeyFrom(e *Order) table.PrimaryKey {
 }
 
 // UnsafePut creates a Put operation without optimistic locking.
-func (idx OrderIndexUtil) UnsafePut(e *Order) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+func (idx *OrderIndexUtil) UnsafePut(e *Order) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
 }
 
 // Delete creates a Delete operation.
-func (idx OrderIndexUtil) Delete(tenantID string, orderID string) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(tenantID, orderID))
+func (idx *OrderIndexUtil) Delete(tenantID string, orderID string) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey(tenantID, orderID))
 }
 
 // UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx OrderIndexUtil) UnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(tenantID, orderID))
+func (idx *OrderIndexUtil) UnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(tenantID, orderID))
 }
 
 // -------------------------------------------------------------------------
@@ -241,10 +83,10 @@ type OrderPrimaryQuery struct {
 func (q OrderPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 
 // QueryPartition creates a query for the given partition key on the primary index.
-func (idx OrderIndexUtil) QueryPartition(tenantID string) OrderPrimaryQuery {
+func (idx *OrderIndexUtil) QueryPartition(tenantID string) OrderPrimaryQuery {
 	return OrderPrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "TENANT#"+tenantID),
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, "TENANT#"+tenantID),
 	}
 }
 
@@ -289,17 +131,23 @@ func (q OrderPrimaryQuery) OrderIDLessThanOrEqual(orderID string) ddbsdk.QueryDe
 
 // MessageIndexUtil wraps the PrimaryIndex with strongly-typed methods.
 type MessageIndexUtil struct {
-	*index.PrimaryIndex[Message]
+	o  sync.Once
+	pi *index.PrimaryIndex[Message]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *MessageIndexUtil) Definition() *index.PrimaryIndex[Message] {
+	idx.o.Do(func() { idx.pi = indices.Get[Message]() })
+	return idx.pi
 }
 
 // MessageIndex is the typed wrapper for Message operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
 var MessageIndex MessageIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
-func (idx MessageIndexUtil) PrimaryKey(chatID string, sequenceNum int64) table.PrimaryKey {
+func (idx *MessageIndexUtil) PrimaryKey(chatID string, sequenceNum int64) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "CHAT#" + chatID,
 			SortKey:      "MSG#" + strconv.FormatInt(sequenceNum, 10),
@@ -308,9 +156,9 @@ func (idx MessageIndexUtil) PrimaryKey(chatID string, sequenceNum int64) table.P
 }
 
 // PrimaryKeyFrom creates the primary key from a Message entity.
-func (idx MessageIndexUtil) PrimaryKeyFrom(e *Message) table.PrimaryKey {
+func (idx *MessageIndexUtil) PrimaryKeyFrom(e *Message) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "CHAT#" + e.ChatID,
 			SortKey:      "MSG#" + strconv.FormatInt(e.SequenceNum, 10),
@@ -319,18 +167,18 @@ func (idx MessageIndexUtil) PrimaryKeyFrom(e *Message) table.PrimaryKey {
 }
 
 // UnsafePut creates a Put operation without optimistic locking.
-func (idx MessageIndexUtil) UnsafePut(e *Message) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+func (idx *MessageIndexUtil) UnsafePut(e *Message) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
 }
 
 // Delete creates a Delete operation.
-func (idx MessageIndexUtil) Delete(chatID string, sequenceNum int64) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(chatID, sequenceNum))
+func (idx *MessageIndexUtil) Delete(chatID string, sequenceNum int64) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey(chatID, sequenceNum))
 }
 
 // UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx MessageIndexUtil) UnsafeUpdate(chatID string, sequenceNum int64) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(chatID, sequenceNum))
+func (idx *MessageIndexUtil) UnsafeUpdate(chatID string, sequenceNum int64) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(chatID, sequenceNum))
 }
 
 // -------------------------------------------------------------------------
@@ -347,10 +195,10 @@ type MessagePrimaryQuery struct {
 func (q MessagePrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 
 // QueryPartition creates a query for the given partition key on the primary index.
-func (idx MessageIndexUtil) QueryPartition(chatID string) MessagePrimaryQuery {
+func (idx *MessageIndexUtil) QueryPartition(chatID string) MessagePrimaryQuery {
 	return MessagePrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "CHAT#"+chatID),
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, "CHAT#"+chatID),
 	}
 }
 
@@ -395,17 +243,23 @@ func (q MessagePrimaryQuery) SequenceNumLessThanOrEqual(sequenceNum int64) ddbsd
 
 // EventIndexUtil wraps the PrimaryIndex with strongly-typed methods.
 type EventIndexUtil struct {
-	*index.PrimaryIndex[Event]
+	o  sync.Once
+	pi *index.PrimaryIndex[Event]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *EventIndexUtil) Definition() *index.PrimaryIndex[Event] {
+	idx.o.Do(func() { idx.pi = indices.Get[Event]() })
+	return idx.pi
 }
 
 // EventIndex is the typed wrapper for Event operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
 var EventIndex EventIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
-func (idx EventIndexUtil) PrimaryKey(eventID string, timestamp time.Time) table.PrimaryKey {
+func (idx *EventIndexUtil) PrimaryKey(eventID string, timestamp time.Time) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "EVENT#" + eventID,
 			SortKey:      "EVENT#" + fmt.Sprintf("%020d", timestamp.UnixNano()),
@@ -414,9 +268,9 @@ func (idx EventIndexUtil) PrimaryKey(eventID string, timestamp time.Time) table.
 }
 
 // PrimaryKeyFrom creates the primary key from a Event entity.
-func (idx EventIndexUtil) PrimaryKeyFrom(e *Event) table.PrimaryKey {
+func (idx *EventIndexUtil) PrimaryKeyFrom(e *Event) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "EVENT#" + e.EventID,
 			SortKey:      "EVENT#" + fmt.Sprintf("%020d", e.Timestamp.UnixNano()),
@@ -425,18 +279,18 @@ func (idx EventIndexUtil) PrimaryKeyFrom(e *Event) table.PrimaryKey {
 }
 
 // UnsafePut creates a Put operation without optimistic locking.
-func (idx EventIndexUtil) UnsafePut(e *Event) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+func (idx *EventIndexUtil) UnsafePut(e *Event) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
 }
 
 // Delete creates a Delete operation.
-func (idx EventIndexUtil) Delete(eventID string, timestamp time.Time) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey(eventID, timestamp))
+func (idx *EventIndexUtil) Delete(eventID string, timestamp time.Time) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey(eventID, timestamp))
 }
 
 // UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx EventIndexUtil) UnsafeUpdate(eventID string, timestamp time.Time) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey(eventID, timestamp))
+func (idx *EventIndexUtil) UnsafeUpdate(eventID string, timestamp time.Time) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(eventID, timestamp))
 }
 
 // -------------------------------------------------------------------------
@@ -453,10 +307,10 @@ type EventPrimaryQuery struct {
 func (q EventPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 
 // QueryPartition creates a query for the given partition key on the primary index.
-func (idx EventIndexUtil) QueryPartition(eventID string) EventPrimaryQuery {
+func (idx *EventIndexUtil) QueryPartition(eventID string) EventPrimaryQuery {
 	return EventPrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "EVENT#"+eventID),
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, "EVENT#"+eventID),
 	}
 }
 
@@ -501,17 +355,23 @@ func (q EventPrimaryQuery) TimestampLessThanOrEqual(timestamp time.Time) ddbsdk.
 
 // RandomEntityIndexUtil wraps the PrimaryIndex with strongly-typed methods.
 type RandomEntityIndexUtil struct {
-	*index.PrimaryIndex[RandomEntity]
+	o  sync.Once
+	pi *index.PrimaryIndex[RandomEntity]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *RandomEntityIndexUtil) Definition() *index.PrimaryIndex[RandomEntity] {
+	idx.o.Do(func() { idx.pi = indices.Get[RandomEntity]() })
+	return idx.pi
 }
 
 // RandomEntityIndex is the typed wrapper for RandomEntity operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
 var RandomEntityIndex RandomEntityIndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
-func (idx RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
+func (idx *RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "world",
 			SortKey:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f},
@@ -520,9 +380,9 @@ func (idx RandomEntityIndexUtil) PrimaryKey() table.PrimaryKey {
 }
 
 // PrimaryKeyFrom creates the primary key from a RandomEntity entity.
-func (idx RandomEntityIndexUtil) PrimaryKeyFrom(e *RandomEntity) table.PrimaryKey {
+func (idx *RandomEntityIndexUtil) PrimaryKeyFrom(e *RandomEntity) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "world",
 			SortKey:      []byte{0x48, 0x65, 0x6c, 0x6c, 0x6f},
@@ -531,10 +391,10 @@ func (idx RandomEntityIndexUtil) PrimaryKeyFrom(e *RandomEntity) table.PrimaryKe
 }
 
 // GSIKeysFrom creates all GSI keys from a RandomEntity entity.
-func (idx RandomEntityIndexUtil) GSIKeysFrom(e *RandomEntity) []table.PrimaryKey {
+func (idx *RandomEntityIndexUtil) GSIKeysFrom(e *RandomEntity) []table.PrimaryKey {
 	return []table.PrimaryKey{
 		{
-			Definition: idx.Secondary[0].KeyDefinition(),
+			Definition: idx.Definition().Secondary[0].KeyDefinition(),
 			Values: table.PrimaryKeyValues{
 				PartitionKey: "LOL",
 				SortKey:      "SAME#" + e.ID,
@@ -544,24 +404,24 @@ func (idx RandomEntityIndexUtil) GSIKeysFrom(e *RandomEntity) []table.PrimaryKey
 }
 
 // UnsafePut creates a Put operation without optimistic locking.
-func (idx RandomEntityIndexUtil) UnsafePut(e *RandomEntity) *ddbsdk.Put {
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+func (idx *RandomEntityIndexUtil) UnsafePut(e *RandomEntity) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
 }
 
 // Delete creates a Delete operation.
-func (idx RandomEntityIndexUtil) Delete() *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey())
+func (idx *RandomEntityIndexUtil) Delete() *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey())
 }
 
 // UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx RandomEntityIndexUtil) UnsafeUpdate() *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey())
+func (idx *RandomEntityIndexUtil) UnsafeUpdate() *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey())
 }
 
 // GSI1Key creates a key for querying the GSI1 GSI.
-func (idx RandomEntityIndexUtil) GSI1Key(id string) table.PrimaryKey {
+func (idx *RandomEntityIndexUtil) GSI1Key(id string) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Secondary[0].KeyDefinition(),
+		Definition: idx.Definition().Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "LOL",
 			SortKey:      "SAME#" + id,
@@ -583,10 +443,10 @@ type RandomEntityPrimaryQuery struct {
 func (q RandomEntityPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 
 // QueryPartition creates a query for the given partition key on the primary index.
-func (idx RandomEntityIndexUtil) QueryPartition() RandomEntityPrimaryQuery {
+func (idx *RandomEntityIndexUtil) QueryPartition() RandomEntityPrimaryQuery {
 	return RandomEntityPrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, "world"),
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, "world"),
 	}
 }
 
@@ -600,8 +460,7 @@ type RandomEntityIndexGSI1Util struct {
 }
 
 // RandomEntityIndexGSI1 is the query-only wrapper for the GSI1 GSI.
-// Initialized in init() to ensure index vars are populated first.
-var RandomEntityIndexGSI1 RandomEntityIndexGSI1Util
+var RandomEntityIndexGSI1 = RandomEntityIndexGSI1Util{primary: &RandomEntityIndex}
 
 // RandomEntityGSI1Query is a query builder for the GSI1 GSI.
 type RandomEntityGSI1Query struct {
@@ -616,7 +475,7 @@ func (q RandomEntityGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
 func (idx RandomEntityIndexGSI1Util) QueryPartition() RandomEntityGSI1Query {
 	return RandomEntityGSI1Query{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.primary.Table, "LOL").OnIndex("GSI1"),
+		qd:  ddbsdk.QueryPartition(idx.primary.Definition().Table, "LOL").OnIndex("GSI1"),
 	}
 }
 
@@ -655,12 +514,172 @@ func (q RandomEntityGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
 	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("SAME#" + id))
 }
 
-func init() {
-	UserIndex = UserIndexUtil{PrimaryIndex: indices.Get[User]()}
-	UserIndexGSI1 = UserIndexGSI1Util{primary: &UserIndex}
-	OrderIndex = OrderIndexUtil{PrimaryIndex: indices.Get[Order]()}
-	MessageIndex = MessageIndexUtil{PrimaryIndex: indices.Get[Message]()}
-	EventIndex = EventIndexUtil{PrimaryIndex: indices.Get[Event]()}
-	RandomEntityIndex = RandomEntityIndexUtil{PrimaryIndex: indices.Get[RandomEntity]()}
-	RandomEntityIndexGSI1 = RandomEntityIndexGSI1Util{primary: &RandomEntityIndex}
+// =============================================================================
+// User Index Wrapper
+// =============================================================================
+
+// UserIndexUtil wraps the PrimaryIndex with strongly-typed methods.
+type UserIndexUtil struct {
+	o  sync.Once
+	pi *index.PrimaryIndex[User]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *UserIndexUtil) Definition() *index.PrimaryIndex[User] {
+	idx.o.Do(func() { idx.pi = indices.Get[User]() })
+	return idx.pi
+}
+
+// UserIndex is the typed wrapper for User operations.
+var UserIndex UserIndexUtil
+
+// PrimaryKey creates a primary key from explicit parameters.
+func (idx *UserIndexUtil) PrimaryKey(id string) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Definition().Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "USER#" + id,
+			SortKey:      "PROFILE",
+		},
+	}
+}
+
+// PrimaryKeyFrom creates the primary key from a User entity.
+func (idx *UserIndexUtil) PrimaryKeyFrom(e *User) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Definition().Table.KeyDefinitions,
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "USER#" + e.UserID,
+			SortKey:      "PROFILE",
+		},
+	}
+}
+
+// GSIKeysFrom creates all GSI keys from a User entity.
+func (idx *UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
+	return []table.PrimaryKey{
+		{
+			Definition: idx.Definition().Secondary[0].KeyDefinition(),
+			Values: table.PrimaryKeyValues{
+				PartitionKey: "EMAIL#" + e.Email,
+				SortKey:      "USER#" + e.UserID,
+			},
+		},
+	}
+}
+
+// UnsafePut creates a Put operation without optimistic locking.
+func (idx *UserIndexUtil) UnsafePut(e *User) *ddbsdk.Put {
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+}
+
+// SafePut creates a Put operation with optimistic locking.
+func (idx *UserIndexUtil) SafePut(e *User) *ddbsdk.PutWithCondition {
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+}
+
+// Delete creates a Delete operation.
+func (idx *UserIndexUtil) Delete(id string) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey(id))
+}
+
+// UnsafeUpdate creates an Update operation without optimistic locking.
+func (idx *UserIndexUtil) UnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(id))
+}
+
+// GSI1Key creates a key for querying the GSI1 GSI.
+func (idx *UserIndexUtil) GSI1Key(email string, id string) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Definition().Secondary[0].KeyDefinition(),
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "EMAIL#" + email,
+			SortKey:      "USER#" + id,
+		},
+	}
+}
+
+// -------------------------------------------------------------------------
+// Primary Index Query Builder
+// -------------------------------------------------------------------------
+
+// UserPrimaryQuery is a query builder for the primary index.
+type UserPrimaryQuery struct {
+	idx *UserIndexUtil
+	qd  ddbsdk.QueryDef
+}
+
+// Build returns the underlying QueryDef, implementing ddbsdk.QueryBuilder.
+func (q UserPrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the primary index.
+func (idx *UserIndexUtil) QueryPartition(id string) UserPrimaryQuery {
+	return UserPrimaryQuery{
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, "USER#"+id),
+	}
+}
+
+// -------------------------------------------------------------------------
+// UserIndexGSI1 - Query-only GSI Wrapper
+// -------------------------------------------------------------------------
+
+// UserIndexGSI1Util provides query methods for the GSI1 GSI.
+type UserIndexGSI1Util struct {
+	primary *UserIndexUtil
+}
+
+// UserIndexGSI1 is the query-only wrapper for the GSI1 GSI.
+var UserIndexGSI1 = UserIndexGSI1Util{primary: &UserIndex}
+
+// UserGSI1Query is a query builder for the GSI1 GSI.
+type UserGSI1Query struct {
+	idx *UserIndexGSI1Util
+	qd  ddbsdk.QueryDef
+}
+
+// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
+func (q UserGSI1Query) QueryDef() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the GSI1 GSI.
+func (idx UserIndexGSI1Util) QueryPartition(email string) UserGSI1Query {
+	return UserGSI1Query{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.primary.Definition().Table, "EMAIL#"+email).OnIndex("GSI1"),
+	}
+}
+
+// IdEquals adds a sort key equals condition and returns the final QueryDef.
+func (q UserGSI1Query) IdEquals(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals("USER#" + id))
+}
+
+// IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q UserGSI1Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("USER#" + prefix))
+}
+
+// IdBetween adds a sort key between condition and returns the final QueryDef.
+func (q UserGSI1Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between("USER#"+idStart, "USER#"+idEnd))
+}
+
+// IdGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q UserGSI1Query) IdGreaterThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("USER#" + id))
+}
+
+// IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q UserGSI1Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("USER#" + id))
+}
+
+// IdLessThan adds a sort key < condition and returns the final QueryDef.
+func (q UserGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan("USER#" + id))
+}
+
+// IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("USER#" + id))
 }

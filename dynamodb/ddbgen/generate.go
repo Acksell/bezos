@@ -58,6 +58,10 @@ func Generate(opts GenerateOptions) error {
 	entries := indices.All()
 	if len(entries) == 0 {
 		fmt.Fprintf(os.Stderr, "ddbgen: no registered indexes found\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "Register indexes in your package using indices.Add:\n")
+		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "  var _ = indices.Add(index.PrimaryIndex[MyEntity]{...})\n")
 		return nil
 	}
 

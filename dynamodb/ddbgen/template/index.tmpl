@@ -15,17 +15,23 @@ import (
 
 // {{$idx.Name}}IndexUtil wraps the PrimaryIndex with strongly-typed methods.
 type {{$idx.Name}}IndexUtil struct {
-	*index.PrimaryIndex[{{$idx.EntityType}}]
+	o  sync.Once
+	pi *index.PrimaryIndex[{{$idx.EntityType}}]
+}
+
+// Definition returns the underlying PrimaryIndex, resolving it lazily on first call.
+func (idx *{{$idx.Name}}IndexUtil) Definition() *index.PrimaryIndex[{{$idx.EntityType}}] {
+	idx.o.Do(func() { idx.pi = indices.Get[{{$idx.EntityType}}]() })
+	return idx.pi
 }
 
 // {{$idx.Name}}Index is the typed wrapper for {{$idx.Name}} operations.
-// Initialized in init() to ensure indices.Add() calls complete first.
 var {{$idx.Name}}Index {{$idx.Name}}IndexUtil
 
 // PrimaryKey creates a primary key from explicit parameters.
-func (idx {{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKey {
+func (idx *{{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: {{$idx.PartitionKey.FormatExpr}},
 			{{- if $idx.HasSortKey}}
@@ -36,9 +42,9 @@ func (idx {{$idx.Name}}IndexUtil) PrimaryKey({{allParams $idx}}) table.PrimaryKe
 }
 {{if $idx.HasEntity}}
 // PrimaryKeyFrom creates the primary key from a {{$idx.EntityType}} entity.
-func (idx {{$idx.Name}}IndexUtil) PrimaryKeyFrom(e *{{$idx.EntityType}}) table.PrimaryKey {
+func (idx *{{$idx.Name}}IndexUtil) PrimaryKeyFrom(e *{{$idx.EntityType}}) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Table.KeyDefinitions,
+		Definition: idx.Definition().Table.KeyDefinitions,
 		Values: table.PrimaryKeyValues{
 			PartitionKey: {{$idx.PartitionKey.EntityFormatExpr}},
 			{{- if $idx.HasSortKey}}
@@ -49,11 +55,11 @@ func (idx {{$idx.Name}}IndexUtil) PrimaryKeyFrom(e *{{$idx.EntityType}}) table.P
 }
 {{if $idx.GSIs}}
 // GSIKeysFrom creates all GSI keys from a {{$idx.EntityType}} entity.
-func (idx {{$idx.Name}}IndexUtil) GSIKeysFrom(e *{{$idx.EntityType}}) []table.PrimaryKey {
+func (idx *{{$idx.Name}}IndexUtil) GSIKeysFrom(e *{{$idx.EntityType}}) []table.PrimaryKey {
 	return []table.PrimaryKey{
 		{{- range $gsi := $idx.GSIs}}
 		{
-			Definition: idx.Secondary[{{$gsi.Index}}].KeyDefinition(),
+			Definition: idx.Definition().Secondary[{{$gsi.Index}}].KeyDefinition(),
 			Values: table.PrimaryKeyValues{
 				PartitionKey: {{$gsi.PartitionKey.EntityFormatExpr}},
 				{{- if $gsi.HasSortKey}}
@@ -66,39 +72,39 @@ func (idx {{$idx.Name}}IndexUtil) GSIKeysFrom(e *{{$idx.EntityType}}) []table.Pr
 }
 {{end}}
 // UnsafePut creates a Put operation without optimistic locking.
-func (idx {{$idx.Name}}IndexUtil) UnsafePut(e *{{$idx.EntityType}}) *ddbsdk.Put {
+func (idx *{{$idx.Name}}IndexUtil) UnsafePut(e *{{$idx.EntityType}}) *ddbsdk.Put {
 	{{- if $idx.GSIs}}
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
 	{{- else}}
-	return ddbsdk.NewUnsafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+	return ddbsdk.NewUnsafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
 	{{- end}}
 }
 {{if $idx.IsVersioned}}
 // SafePut creates a Put operation with optimistic locking.
-func (idx {{$idx.Name}}IndexUtil) SafePut(e *{{$idx.EntityType}}) *ddbsdk.PutWithCondition {
+func (idx *{{$idx.Name}}IndexUtil) SafePut(e *{{$idx.EntityType}}) *ddbsdk.PutWithCondition {
 	{{- if $idx.GSIs}}
-	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
 	{{- else}}
-	return ddbsdk.NewSafePut(idx.Table, idx.PrimaryKeyFrom(e), e)
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
 	{{- end}}
 }
 {{end}}
 {{end}}
 // Delete creates a Delete operation.
-func (idx {{$idx.Name}}IndexUtil) Delete({{allParams $idx}}) *ddbsdk.Delete {
-	return ddbsdk.NewDelete(idx.Table, idx.PrimaryKey({{allArgs $idx}}))
+func (idx *{{$idx.Name}}IndexUtil) Delete({{allParams $idx}}) *ddbsdk.Delete {
+	return ddbsdk.NewDelete(idx.Definition().Table, idx.PrimaryKey({{allArgs $idx}}))
 }
 
 // UnsafeUpdate creates an Update operation without optimistic locking.
-func (idx {{$idx.Name}}IndexUtil) UnsafeUpdate({{allParams $idx}}) *ddbsdk.UnsafeUpdate {
-	return ddbsdk.NewUnsafeUpdate(idx.Table, idx.PrimaryKey({{allArgs $idx}}))
+func (idx *{{$idx.Name}}IndexUtil) UnsafeUpdate({{allParams $idx}}) *ddbsdk.UnsafeUpdate {
+	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey({{allArgs $idx}}))
 }
 
 {{range $gsi := $idx.GSIs}}
 // {{$gsi.Name}}Key creates a key for querying the {{$gsi.Name}} GSI.
-func (idx {{$idx.Name}}IndexUtil) {{$gsi.Name}}Key({{gsiAllParams $gsi}}) table.PrimaryKey {
+func (idx *{{$idx.Name}}IndexUtil) {{$gsi.Name}}Key({{gsiAllParams $gsi}}) table.PrimaryKey {
 	return table.PrimaryKey{
-		Definition: idx.Secondary[{{$gsi.Index}}].KeyDefinition(),
+		Definition: idx.Definition().Secondary[{{$gsi.Index}}].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
 			PartitionKey: {{$gsi.PartitionKey.FormatExpr}},
 			{{- if $gsi.HasSortKey}}
@@ -123,10 +129,10 @@ type {{$idx.Name}}PrimaryQuery struct {
 func (q {{$idx.Name}}PrimaryQuery) Build() ddbsdk.QueryDef { return q.qd }
 
 // QueryPartition creates a query for the given partition key on the primary index.
-func (idx {{$idx.Name}}IndexUtil) QueryPartition({{pkParams $idx.PartitionKey}}) {{$idx.Name}}PrimaryQuery {
+func (idx *{{$idx.Name}}IndexUtil) QueryPartition({{pkParams $idx.PartitionKey}}) {{$idx.Name}}PrimaryQuery {
 	return {{$idx.Name}}PrimaryQuery{
-		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.Table, {{$idx.PartitionKey.FormatExpr}}),
+		idx: idx,
+		qd:  ddbsdk.QueryPartition(idx.Definition().Table, {{$idx.PartitionKey.FormatExpr}}),
 	}
 }
 {{if and $idx.HasSortKey (not $idx.SortKey.IsConstant)}}
@@ -176,8 +182,7 @@ type {{$idx.Name}}Index{{$gsi.Name}}Util struct {
 }
 
 // {{$idx.Name}}Index{{$gsi.Name}} is the query-only wrapper for the {{$gsi.Name}} GSI.
-// Initialized in init() to ensure index vars are populated first.
-var {{$idx.Name}}Index{{$gsi.Name}} {{$idx.Name}}Index{{$gsi.Name}}Util
+var {{$idx.Name}}Index{{$gsi.Name}} = {{$idx.Name}}Index{{$gsi.Name}}Util{primary: &{{$idx.Name}}Index}
 
 // {{$idx.Name}}{{$gsi.Name}}Query is a query builder for the {{$gsi.Name}} GSI.
 type {{$idx.Name}}{{$gsi.Name}}Query struct {
@@ -192,7 +197,7 @@ func (q {{$idx.Name}}{{$gsi.Name}}Query) QueryDef() ddbsdk.QueryDef { return q.q
 func (idx {{$idx.Name}}Index{{$gsi.Name}}Util) QueryPartition({{pkParams $gsi.PartitionKey}}) {{$idx.Name}}{{$gsi.Name}}Query {
 	return {{$idx.Name}}{{$gsi.Name}}Query{
 		idx: &idx,
-		qd:  ddbsdk.QueryPartition(idx.primary.Table, {{$gsi.PartitionKey.FormatExpr}}).OnIndex("{{$gsi.Name}}"),
+		qd:  ddbsdk.QueryPartition(idx.primary.Definition().Table, {{$gsi.PartitionKey.FormatExpr}}).OnIndex("{{$gsi.Name}}"),
 	}
 }
 {{if and $gsi.HasSortKey (not $gsi.SortKey.IsConstant)}}
@@ -233,12 +238,3 @@ func (q {{$idx.Name}}{{$gsi.Name}}Query) {{skPrefix $gsi.SortKey}}LessThanOrEqua
 {{end}}
 {{end}}
 {{end}}
-
-func init() {
-{{- range $idx := .Indexes}}
-	{{$idx.Name}}Index = {{$idx.Name}}IndexUtil{PrimaryIndex: indices.Get[{{$idx.EntityType}}]()}
-{{- range $gsi := $idx.GSIs}}
-	{{$idx.Name}}Index{{$gsi.Name}} = {{$idx.Name}}Index{{$gsi.Name}}Util{primary: &{{$idx.Name}}Index}
-{{- end}}
-{{- end}}
-}

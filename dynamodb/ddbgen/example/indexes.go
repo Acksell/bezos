@@ -33,18 +33,20 @@ var UserTable = table.TableDefinition{
 	},
 }
 
-var _ = indices.Add(index.PrimaryIndex[User]{
-	Table:        UserTable,
-	PartitionKey: val.Fmt("USER#{id}"),
-	SortKey:      val.Fmt("PROFILE").Ptr(),
-	Secondary: []index.SecondaryIndex{
-		{
-			GSI:       UserTable.GSIs[0],
-			Partition: val.Fmt("EMAIL#{email}"),
-			Sort:      val.Fmt("USER#{id}").Ptr(),
+func init() {
+	indices.Add(index.PrimaryIndex[User]{
+		Table:        UserTable,
+		PartitionKey: val.Fmt("USER#{id}"),
+		SortKey:      val.Fmt("PROFILE").Ptr(),
+		Secondary: []index.SecondaryIndex{
+			{
+				GSI:       UserTable.GSIs[0],
+				Partition: val.Fmt("EMAIL#{email}"),
+				Sort:      val.Fmt("USER#{id}").Ptr(),
+			},
 		},
-	},
-})
+	})
+}
 
 var OrderTable = table.TableDefinition{
 	Name: "orders",

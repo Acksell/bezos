@@ -137,13 +137,19 @@ func runGenFromCLI() error {
 	if len(genFiles) == 0 {
 		return fmt.Errorf(`no gen/main.go files found
 
-To set up code generation, add this directive to your indexes file:
+To set up code generation:
 
-  //go:generate ddb gen
+  1. Register your indexes using indices.Add in your indexes file:
 
-Then run:
+       var _ = indices.Add(index.PrimaryIndex[MyEntity]{...})
 
-  go generate ./...`)
+  2. Add this directive to the same file:
+
+       //go:generate ddb gen
+
+  3. Run:
+
+       go generate ./...`)
 	}
 
 	fmt.Printf("ddb gen: found %d gen file(s)\n", len(genFiles))

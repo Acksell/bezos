@@ -626,6 +626,7 @@ func GenerateCode(packageName string, indexes []IndexInfo) ([]byte, error) {
 	}
 
 	imports := []string{
+		`"sync"`,
 		`"github.com/acksell/bezos/dynamodb/ddbsdk"`,
 		`"github.com/acksell/bezos/dynamodb/index"`,
 		`"github.com/acksell/bezos/dynamodb/index/indices"`,
