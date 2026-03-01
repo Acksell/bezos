@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -66,8 +67,12 @@ func (h *APIHandler) getTable(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "table not found: "+tableName)
 		return
 	}
-	// Return enriched table info including parsed patterns
-	writeJSON(w, http.StatusOK, t)
+	// Return enriched table info including parsed patterns.
+	// The frontend expects { table: {...}, entities: [...] }.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"table":    t.Table,
+		"entities": t.EnrichedEntities,
+	})
 }
 
 // scanItems returns all items in a table with pagination.
@@ -224,12 +229,7 @@ func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Keys) > 25 {
-		writeError(w, http.StatusBadRequest, "maximum 25 items per bulk delete")
-		return
-	}
-
-	// Build batch write request
+	// Build all write requests
 	writeRequests := make([]types.WriteRequest, len(req.Keys))
 	for i, k := range req.Keys {
 		key := buildKey(t, k.PK, k.SK)
@@ -240,16 +240,23 @@ func (h *APIHandler) bulkDeleteItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	input := &dynamodb.BatchWriteItemInput{
-		RequestItems: map[string][]types.WriteRequest{
-			tableName: writeRequests,
-		},
-	}
-
-	_, err := h.client.BatchWriteItem(r.Context(), input)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "bulk delete failed: "+err.Error())
-		return
+	// BatchWriteItem supports max 25 items per call, so chunk.
+	const batchSize = 25
+	for start := 0; start < len(writeRequests); start += batchSize {
+		end := start + batchSize
+		if end > len(writeRequests) {
+			end = len(writeRequests)
+		}
+		input := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]types.WriteRequest{
+				tableName: writeRequests[start:end],
+			},
+		}
+		_, err := h.client.BatchWriteItem(r.Context(), input)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("bulk delete failed after %d/%d items: %s", start, len(req.Keys), err.Error()))
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
