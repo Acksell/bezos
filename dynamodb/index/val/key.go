@@ -11,17 +11,17 @@ import (
 type ValDef struct {
 	// Format specifies a format pattern for the key value.
 	// Created via keys.Fmt(), keys.NumFmt(), or keys.ByteFmt().
-	Format *FmtSpec `json:"format,omitempty"`
+	Format *FmtSpec
 
 	// FromField specifies that the key value should be copied directly
 	// from the named field on the entity. Supports dot notation for
 	// nested fields (e.g., "user.id").
 	// Created via keys.FromField().
-	FromField string `json:"fromField,omitempty"`
+	FromField string
 
 	// Const specifies a constant value for the key.
 	// Created via keys.String(), keys.Number(), or keys.Bytes().
-	Const *ConstValue `json:"const,omitempty"`
+	Const *ConstValue
 }
 
 // Ptr returns a pointer to a copy of this ValDef.
@@ -42,8 +42,8 @@ func (v ValDef) IsZero() bool {
 
 // ConstValue represents a constant key value.
 type ConstValue struct {
-	Kind  SpecKind `json:"kind"`  // DynamoDB attribute type (S, N, B)
-	Value any      `json:"value"` // string, numeric, or []byte
+	Kind  SpecKind // DynamoDB attribute type (S, N, B)
+	Value any      // string, numeric, or []byte
 }
 
 // String creates a ValDef with a constant string value.

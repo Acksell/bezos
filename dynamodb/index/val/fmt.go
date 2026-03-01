@@ -34,18 +34,18 @@ const (
 // Supported modifiers:
 //   - utc: Converts time.Time to UTC before formatting (recommended for sort keys)
 type FmtSpec struct {
-	Raw   string     `json:"raw"`   // Original pattern string
-	Kind  SpecKind   `json:"kind"`  // DynamoDB attribute type (S, N, B)
-	Parts []SpecPart `json:"parts"` // Parsed literal and field reference parts
+	Raw   string     // Original pattern string
+	Kind  SpecKind   // DynamoDB attribute type (S, N, B)
+	Parts []SpecPart // Parsed literal and field reference parts
 }
 
 // SpecPart represents a single part of a format pattern - either a literal string
 // or a field reference with optional format annotations.
 type SpecPart struct {
-	IsLiteral  bool     `json:"isLiteral"`            // true if this is a literal string, false if field reference
-	Value      string   `json:"value"`                // the literal value or field path (e.g., "user.id")
-	Formats    []string `json:"formats,omitempty"`    // format modifiers in order (e.g., ["utc", "rfc3339"] or ["unixnano"])
-	PrintfSpec string   `json:"printfSpec,omitempty"` // printf format spec (e.g., "%020d") - only for field refs
+	IsLiteral  bool     // true if this is a literal string, false if field reference
+	Value      string   // the literal value or field path (e.g., "user.id")
+	Formats    []string // format modifiers in order (e.g., ["utc", "rfc3339"] or ["unixnano"])
+	PrintfSpec string   // printf format spec (e.g., "%020d") - only for field refs
 }
 
 // todo whhyyy do we care about backwards compatibility?

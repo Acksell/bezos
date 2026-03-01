@@ -6,36 +6,36 @@ import "github.com/acksell/bezos/dynamodb/index/val"
 // Index info types (used by code generation)
 // =============================================================================
 
-// IndexInfo holds the data extracted from a PrimaryIndex variable.
+// indexInfo holds the data extracted from a PrimaryIndex variable.
 // Used by code generation to build type-safe accessor functions.
-type IndexInfo struct {
-	VarName      string      `json:"varName"`
-	EntityType   string      `json:"entityType"`
-	TableName    string      `json:"tableName"`
-	PKDefName    string      `json:"pkDefName"`
-	SKDefName    string      `json:"skDefName"`
-	PartitionKey val.ValDef  `json:"partitionKey"`
-	SortKey      *val.ValDef `json:"sortKey,omitempty"`
-	GSIs         []GSIInfo   `json:"gsis,omitempty"`
-	IsVersioned  bool        `json:"isVersioned"`
-	Fields       []FieldInfo `json:"fields"`
+type indexInfo struct {
+	VarName      string
+	EntityType   string
+	TableName    string
+	PKDefName    string
+	SKDefName    string
+	PartitionKey val.ValDef
+	SortKey      *val.ValDef
+	GSIs         []gsiInfo
+	IsVersioned  bool
+	Fields       []fieldInfo
 }
 
-// GSIInfo holds GSI data extracted from a SecondaryIndex.
-type GSIInfo struct {
-	Name      string      `json:"name"`
-	Index     int         `json:"index"`
-	PKDef     string      `json:"pkDef"`
-	PKPattern val.ValDef  `json:"pkPattern"`
-	SKDef     string      `json:"skDef"`
-	SKPattern *val.ValDef `json:"skPattern,omitempty"`
+// gsiInfo holds GSI data extracted from a SecondaryIndex.
+type gsiInfo struct {
+	Name      string
+	Index     int
+	PKDef     string
+	PKPattern val.ValDef
+	SKDef     string
+	SKPattern *val.ValDef
 }
 
-// FieldInfo holds metadata about an entity struct field.
-type FieldInfo struct {
-	Name string `json:"name"`
-	Tag  string `json:"tag"`
-	Type string `json:"type"`
+// fieldInfo holds metadata about an entity struct field.
+type fieldInfo struct {
+	Name string
+	Tag  string
+	Type string
 }
 
 // =============================================================================

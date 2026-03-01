@@ -8,13 +8,13 @@ import (
 )
 
 type PrimaryKeyDefinition struct {
-	PartitionKey KeyDef `json:"partitionKey"`
-	SortKey      KeyDef `json:"sortKey,omitempty"` // pointer to indicate optionality? or just focus on single table design where it's not optional?
+	PartitionKey KeyDef
+	SortKey      KeyDef // pointer to indicate optionality? or just focus on single table design where it's not optional?
 }
 
 type KeyDef struct {
-	Name string  `json:"name"`
-	Kind KeyKind `json:"kind"`
+	Name string
+	Kind KeyKind
 }
 
 type KeyKind string

@@ -65,10 +65,10 @@ func Generate(opts GenerateOptions) error {
 		return nil
 	}
 
-	// Convert registry entries to IndexInfo using reflection.
-	indexInfos := make([]IndexInfo, 0, len(entries))
+	// Convert registry entries to indexInfo using reflection.
+	indexInfos := make([]indexInfo, 0, len(entries))
 	for _, entry := range entries {
-		info, err := entryToIndexInfo(entry)
+		info, err := entryToindexInfo(entry)
 		if err != nil {
 			return fmt.Errorf("processing %s: %w", entry.EntityType.Name(), err)
 		}
@@ -76,7 +76,7 @@ func Generate(opts GenerateOptions) error {
 	}
 
 	// Generate code.
-	code, err := GenerateCode(opts.PackageName, indexInfos)
+	code, err := generateCode(opts.PackageName, indexInfos)
 	if err != nil {
 		return fmt.Errorf("generating code: %w", err)
 	}
@@ -111,9 +111,9 @@ func Generate(opts GenerateOptions) error {
 	return nil
 }
 
-// entryToIndexInfo converts an indices.Entry to IndexInfo using reflection.
+// entryToindexInfo converts an indices.Entry to indexInfo using reflection.
 // All the heavy reflection work happens here, keeping the indices package minimal.
-func entryToIndexInfo(entry indices.Entry) (IndexInfo, error) {
+func entryToindexInfo(entry indices.Entry) (indexInfo, error) {
 	entityType := entry.EntityType
 	entityName := entityType.Name()
 
@@ -130,29 +130,29 @@ func entryToIndexInfo(entry indices.Entry) (IndexInfo, error) {
 
 	tbl, ok := tableField.Interface().(table.TableDefinition)
 	if !ok {
-		return IndexInfo{}, fmt.Errorf("Table field is not table.TableDefinition")
+		return indexInfo{}, fmt.Errorf("Table field is not table.TableDefinition")
 	}
 
 	pk, ok := pkField.Interface().(val.ValDef)
 	if !ok {
-		return IndexInfo{}, fmt.Errorf("PartitionKey field is not val.ValDef")
+		return indexInfo{}, fmt.Errorf("PartitionKey field is not val.ValDef")
 	}
 
 	var sk *val.ValDef
 	if !skField.IsNil() {
 		skVal, ok := skField.Interface().(*val.ValDef)
 		if !ok {
-			return IndexInfo{}, fmt.Errorf("SortKey field is not *val.ValDef")
+			return indexInfo{}, fmt.Errorf("SortKey field is not *val.ValDef")
 		}
 		sk = skVal
 	}
 
 	// Build GSI info.
-	var gsis []GSIInfo
+	var gsis []gsiInfo
 	if secondaryField.IsValid() && secondaryField.Kind() == reflect.Slice && secondaryField.Len() > 0 {
 		for i := 0; i < secondaryField.Len(); i++ {
 			sec := secondaryField.Index(i).Interface().(index.SecondaryIndex)
-			gsis = append(gsis, GSIInfo{
+			gsis = append(gsis, gsiInfo{
 				Name:      sec.GSI.Name,
 				Index:     i,
 				PKDef:     sec.GSI.KeyDefinitions.PartitionKey.Name,
@@ -164,7 +164,7 @@ func entryToIndexInfo(entry indices.Entry) (IndexInfo, error) {
 	}
 
 	// Extract entity struct fields with dynamodbav tags.
-	var fields []FieldInfo
+	var fields []fieldInfo
 	if entityType.Kind() == reflect.Struct {
 		for i := 0; i < entityType.NumField(); i++ {
 			f := entityType.Field(i)
@@ -175,7 +175,7 @@ func entryToIndexInfo(entry indices.Entry) (IndexInfo, error) {
 			if commaIdx := strings.IndexByte(tag, ','); commaIdx != -1 {
 				tag = tag[:commaIdx]
 			}
-			fields = append(fields, FieldInfo{
+			fields = append(fields, fieldInfo{
 				Name: f.Name,
 				Tag:  tag,
 				Type: reflectTypeString(f.Type),
@@ -190,7 +190,7 @@ func entryToIndexInfo(entry indices.Entry) (IndexInfo, error) {
 		isVersioned = true
 	}
 
-	return IndexInfo{
+	return indexInfo{
 		VarName:      entityName + "Index",
 		EntityType:   entityName,
 		TableName:    tbl.Name,
