@@ -7,16 +7,16 @@ import (
 )
 
 type TableDefinition struct {
-	Name           string
-	KeyDefinitions PrimaryKeyDefinition
-	TimeToLiveKey  string
-	GSIs           []GSIDefinition
+	Name           string               `json:"name"`
+	KeyDefinitions PrimaryKeyDefinition `json:"keyDefinitions"`
+	TimeToLiveKey  string               `json:"timeToLiveKey,omitempty"`
+	GSIs           []GSIDefinition      `json:"gsis,omitempty"`
 }
 
 // GSIDefinition represents a Global Secondary Index definition.
 type GSIDefinition struct {
-	Name           string
-	KeyDefinitions PrimaryKeyDefinition
+	Name           string               `json:"name"`
+	KeyDefinitions PrimaryKeyDefinition `json:"keyDefinitions"`
 }
 
 // ExtractPrimaryKey extracts the primary key values from a document.

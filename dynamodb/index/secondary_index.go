@@ -19,11 +19,11 @@ import (
 //	}
 type SecondaryIndex struct {
 	// GSI is the GSI definition from the table (contains Name and KeyDefinitions)
-	GSI table.GSIDefinition
+	GSI table.GSIDefinition `json:"gsi"`
 	// Partition defines how to derive the GSI partition key value
-	Partition val.ValDef
+	Partition val.ValDef `json:"partition"`
 	// Sort defines how to derive the GSI sort key value (optional)
-	Sort *val.ValDef
+	Sort *val.ValDef `json:"sort,omitempty"`
 }
 
 // Name returns the GSI name.

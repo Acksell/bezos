@@ -34,20 +34,21 @@ const (
 // Supported modifiers:
 //   - utc: Converts time.Time to UTC before formatting (recommended for sort keys)
 type FmtSpec struct {
-	Raw   string     // Original pattern string
-	Kind  SpecKind   // DynamoDB attribute type (S, N, B)
-	Parts []SpecPart // Parsed literal and field reference parts
+	Raw   string     `json:"raw"`   // Original pattern string
+	Kind  SpecKind   `json:"kind"`  // DynamoDB attribute type (S, N, B)
+	Parts []SpecPart `json:"parts"` // Parsed literal and field reference parts
 }
 
 // SpecPart represents a single part of a format pattern - either a literal string
 // or a field reference with optional format annotations.
 type SpecPart struct {
-	IsLiteral  bool     // true if this is a literal string, false if field reference
-	Value      string   // the literal value or field path (e.g., "user.id")
-	Formats    []string // format modifiers in order (e.g., ["utc", "rfc3339"] or ["unixnano"])
-	PrintfSpec string   // printf format spec (e.g., "%020d") - only for field refs
+	IsLiteral  bool     `json:"isLiteral"`            // true if this is a literal string, false if field reference
+	Value      string   `json:"value"`                // the literal value or field path (e.g., "user.id")
+	Formats    []string `json:"formats,omitempty"`    // format modifiers in order (e.g., ["utc", "rfc3339"] or ["unixnano"])
+	PrintfSpec string   `json:"printfSpec,omitempty"` // printf format spec (e.g., "%020d") - only for field refs
 }
 
+// todo whhyyy do we care about backwards compatibility?
 // Format returns the primary format (last non-printf modifier), for backwards compatibility.
 // For "{ts:utc:rfc3339}" returns "rfc3339". For "{ts:utc:unixnano}" returns "unixnano".
 func (p SpecPart) Format() string {
@@ -82,7 +83,7 @@ var fieldRefRegex = regexp.MustCompile(`\{([^}]*)\}`)
 //	val.Fmt("{seq:%08d}")             // integer with padding
 //	val.Fmt("{ts:unixnano:%020d}")    // time with format and padding
 func Fmt(pattern string) ValDef {
-	s, err := parseFmtSpec(pattern, SpecKindS)
+	s, err := ParseFmtWithKind(pattern, SpecKindS)
 	if err != nil {
 		panic(fmt.Sprintf("val.Fmt: %v", err))
 	}
@@ -90,9 +91,9 @@ func Fmt(pattern string) ValDef {
 }
 
 // ParseFmt parses a format pattern string and returns the FmtSpec.
-// Unlike Fmt, this returns an error instead of panicking.
+// Unlike Fmt, this returns an error instead of panicking. Assumes string type.
 func ParseFmt(pattern string) (*FmtSpec, error) {
-	s, err := parseFmtSpec(pattern, SpecKindS)
+	s, err := ParseFmtWithKind(pattern, SpecKindS)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +136,8 @@ func parseFieldRef(ref string) (fieldPath string, formats []string, printfSpec s
 	return
 }
 
-// parseFmtSpec parses a pattern string into a FmtSpec.
-func parseFmtSpec(raw string, kind SpecKind) (FmtSpec, error) {
+// ParseFmtWithKind parses a pattern string into a FmtSpec with the specified DynamoDB attribute type.
+func ParseFmtWithKind(raw string, kind SpecKind) (FmtSpec, error) {
 	if raw == "" {
 		return FmtSpec{}, fmt.Errorf("pattern cannot be empty")
 	}

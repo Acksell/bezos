@@ -11,17 +11,17 @@ import (
 type ValDef struct {
 	// Format specifies a format pattern for the key value.
 	// Created via keys.Fmt(), keys.NumFmt(), or keys.ByteFmt().
-	Format *FmtSpec
+	Format *FmtSpec `json:"format,omitempty"`
 
 	// FromField specifies that the key value should be copied directly
 	// from the named field on the entity. Supports dot notation for
 	// nested fields (e.g., "user.id").
 	// Created via keys.FromField().
-	FromField string
+	FromField string `json:"fromField,omitempty"`
 
 	// Const specifies a constant value for the key.
 	// Created via keys.String(), keys.Number(), or keys.Bytes().
-	Const *ConstValue
+	Const *ConstValue `json:"const,omitempty"`
 }
 
 // Ptr returns a pointer to a copy of this ValDef.
@@ -42,13 +42,13 @@ func (v ValDef) IsZero() bool {
 
 // ConstValue represents a constant key value.
 type ConstValue struct {
-	kind  SpecKind
-	value any // string, numeric, or []byte
+	Kind  SpecKind `json:"kind"`  // DynamoDB attribute type (S, N, B)
+	Value any      `json:"value"` // string, numeric, or []byte
 }
 
 // String creates a ValDef with a constant string value.
 func String(v string) ValDef {
-	return ValDef{Const: &ConstValue{kind: SpecKindS, value: v}}
+	return ValDef{Const: &ConstValue{Kind: SpecKindS, Value: v}}
 }
 
 // Numeric is a constraint for all numeric types.
@@ -59,7 +59,7 @@ type Numeric interface {
 // Number creates a ValDef with a constant numeric value.
 // Accepts any numeric type (int, float64, etc.).
 func Number[T Numeric](v T) ValDef {
-	return ValDef{Const: &ConstValue{kind: SpecKindN, value: v}}
+	return ValDef{Const: &ConstValue{Kind: SpecKindN, Value: v}}
 }
 
 // Bytes creates a ValDef with a constant binary value.
@@ -69,15 +69,15 @@ func Bytes(b64 string) ValDef {
 	if err != nil {
 		panic("val.Bytes: invalid base64 string: " + err.Error())
 	}
-	return ValDef{Const: &ConstValue{kind: SpecKindB, value: decoded}}
+	return ValDef{Const: &ConstValue{Kind: SpecKindB, Value: decoded}}
 }
 
-// Kind returns the DynamoDB attribute type for this constant.
-func (c *ConstValue) Kind() SpecKind {
-	return c.kind
+// GetKind returns the DynamoDB attribute type for this constant.
+func (c *ConstValue) GetKind() SpecKind {
+	return c.Kind
 }
 
-// Value returns the constant value.
-func (c *ConstValue) Value() any {
-	return c.value
+// GetValue returns the constant value.
+func (c *ConstValue) GetValue() any {
+	return c.Value
 }

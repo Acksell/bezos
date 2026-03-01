@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"text/template"
+
+	"github.com/acksell/bezos/dynamodb/index/val"
 )
 
 // =============================================================================
@@ -21,7 +23,7 @@ type conversionResult struct {
 	UsesTime    bool
 }
 
-func generateConversionExpr(p specPart, fieldExpr string, fieldType string) (conversionResult, error) {
+func generateConversionExpr(p val.SpecPart, fieldExpr string, fieldType string) (conversionResult, error) {
 	if fieldType == "string" {
 		if p.PrintfSpec != "" {
 			return conversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s)", p.PrintfSpec, fieldExpr), UsesFmt: true}, nil
@@ -44,7 +46,7 @@ func generateConversionExpr(p specPart, fieldExpr string, fieldType string) (con
 		return conversionResult{Expr: fmt.Sprintf("strconv.FormatUint(uint64(%s), 10)", fieldExpr), UsesStrconv: true}, nil
 	}
 	if isFloatType(fieldType) {
-		format := p.format()
+		format := p.Format()
 		if p.PrintfSpec == "" && format == "" {
 			return conversionResult{}, fmt.Errorf("float type %s requires explicit format", fieldType)
 		}
@@ -55,12 +57,12 @@ func generateConversionExpr(p specPart, fieldExpr string, fieldType string) (con
 		return conversionResult{Expr: fmt.Sprintf("fmt.Sprintf(%q, %s)", spec, fieldExpr), UsesFmt: true}, nil
 	}
 	if isTimeType(fieldType) {
-		format := p.format()
+		format := p.Format()
 		if format == "" {
 			return conversionResult{}, fmt.Errorf("time.Time field requires explicit format")
 		}
 		timeExpr := fieldExpr
-		if p.hasModifier("utc") {
+		if p.HasModifier("utc") {
 			timeExpr = fmt.Sprintf("%s.UTC()", fieldExpr)
 		}
 		switch format {
@@ -94,7 +96,7 @@ func generateConversionExpr(p specPart, fieldExpr string, fieldType string) (con
 	return conversionResult{Expr: fmt.Sprintf("fmt.Sprintf(\"%%v\", %s)", fieldExpr), UsesFmt: true}, nil
 }
 
-func sortKeyWarning(p specPart, fieldType string, entityType string) string {
+func sortKeyWarning(p val.SpecPart, fieldType string, entityType string) string {
 	if isIntegerType(fieldType) && !hasPadding(p.PrintfSpec) {
 		return fmt.Sprintf("warning: %s sort key uses %s without padding format.\n"+
 			"  String comparison treats \"9\" > \"10\". For correct ordering either:\n"+
@@ -104,12 +106,12 @@ func sortKeyWarning(p specPart, fieldType string, entityType string) string {
 	if isFloatType(fieldType) && !hasPadding(p.PrintfSpec) {
 		spec := p.PrintfSpec
 		if spec == "" {
-			spec = p.format()
+			spec = p.Format()
 		}
 		return fmt.Sprintf("warning: %s sort key uses %s format %q without total width padding.\n"+
 			"  For correct string sorting, specify total width: {field:%%020.2f}\n", entityType, fieldType, spec)
 	}
-	format := p.format()
+	format := p.Format()
 	if isTimeType(fieldType) {
 		switch format {
 		case "unix":
@@ -138,7 +140,7 @@ func sortKeyWarning(p specPart, fieldType string, entityType string) string {
 				"  - unix, unixmilli, or unixnano with padding (numeric, timezone-independent)\n"+
 				"  - {field:utc:rfc3339fixed} to normalize to UTC with constant length\n", entityType)
 		case "rfc3339fixed":
-			if !p.hasModifier("utc") {
+			if !p.HasModifier("utc") {
 				return fmt.Sprintf("warning: %s sort key uses \"rfc3339fixed\" without :utc modifier.\n"+
 					"  While rfc3339fixed has constant length, different timezone offsets still\n"+
 					"  cause incorrect string ordering (e.g., \"...+05:00\" > \"...Z\").\n"+
@@ -180,8 +182,8 @@ func buildIndexData(idx indexInfo) (indexData, error) {
 		IsVersioned:  idx.IsVersioned,
 	}
 
-	if idx.SortKey.Pattern != "" {
-		skData, err := buildKeyData(idx.SortKey, tagMap, true, idx.EntityType)
+	if idx.SortKey != nil && !idx.SortKey.IsZero() {
+		skData, err := buildKeyData(*idx.SortKey, tagMap, true, idx.EntityType)
 		if err != nil {
 			return indexData{}, fmt.Errorf("sort key: %w", err)
 		}
@@ -212,8 +214,8 @@ func buildGSIData(gsi gsiInfo, tagMap map[string]fieldInfo, entityType string) (
 		PartitionKey: pkData,
 	}
 
-	if gsi.SKPattern.Pattern != "" {
-		skData, err := buildKeyData(gsi.SKPattern, tagMap, true, entityType)
+	if gsi.SKPattern != nil && !gsi.SKPattern.IsZero() {
+		skData, err := buildKeyData(*gsi.SKPattern, tagMap, true, entityType)
 		if err != nil {
 			return gsiData{}, fmt.Errorf("sort key: %w", err)
 		}
@@ -224,16 +226,83 @@ func buildGSIData(gsi gsiInfo, tagMap map[string]fieldInfo, entityType string) (
 	return data, nil
 }
 
-func buildKeyData(kp keyPattern, tagMap map[string]fieldInfo, isSortKey bool, entityType string) (keyData, error) {
-	spec, err := parseFmtSpec(kp.Pattern, kp.Kind)
-	if err != nil {
-		return keyData{}, fmt.Errorf("invalid pattern %q: %w", kp.Pattern, err)
+func buildKeyData(vd val.ValDef, tagMap map[string]fieldInfo, isSortKey bool, entityType string) (keyData, error) {
+	// Handle constant values
+	if vd.Const != nil {
+		kind := vd.Const.Kind
+		var formatExpr string
+		var constVal string
+		switch kind {
+		case val.SpecKindB:
+			// After JSON round-trip, []byte becomes a base64 string
+			// todo verify this, potential ai slop (well, more than it already is)
+			switch v := vd.Const.Value.(type) {
+			case []byte:
+				formatExpr = formatByteLiteral(v)
+				constVal = base64.StdEncoding.EncodeToString(v)
+			case string:
+				decoded, err := base64.StdEncoding.DecodeString(v)
+				if err != nil {
+					return keyData{}, fmt.Errorf("invalid base64 for bytes constant: %w", err)
+				}
+				formatExpr = formatByteLiteral(decoded)
+				constVal = v
+			default:
+				return keyData{}, fmt.Errorf("unexpected type %T for bytes constant", vd.Const.Value)
+			}
+		case val.SpecKindN:
+			constVal = fmt.Sprintf("%v", vd.Const.Value)
+			formatExpr = constVal // Number constants are just literals
+		default: // SpecKindS
+			constVal = fmt.Sprintf("%v", vd.Const.Value)
+			formatExpr = fmt.Sprintf("%q", constVal)
+		}
+		return keyData{
+			FormatExpr:       formatExpr,
+			EntityFormatExpr: formatExpr,
+			IsConstant:       true,
+			LiteralPrefix:    constVal,
+		}, nil
 	}
 
-	if spec.isConstant() {
-		formatExpr := fmt.Sprintf("%q", kp.Pattern)
-		if kp.Kind == "B" {
-			decoded, err := base64.StdEncoding.DecodeString(kp.Pattern)
+	// Handle FromField - direct field reference
+	if vd.FromField != "" {
+		field, ok := tagMap[vd.FromField]
+		if !ok {
+			return keyData{}, fmt.Errorf("no struct field found with tag %q", vd.FromField)
+		}
+		pName := vd.FromField
+		pType := goParamType(field.Type)
+		part := val.SpecPart{Value: vd.FromField}
+		paramResult, err := generateConversionExpr(part, pName, field.Type)
+		if err != nil {
+			return keyData{}, fmt.Errorf("field %q: %w", vd.FromField, err)
+		}
+		entityResult, err := generateConversionExpr(part, "e."+field.Name, field.Type)
+		if err != nil {
+			return keyData{}, fmt.Errorf("field %q: %w", vd.FromField, err)
+		}
+		return keyData{
+			Params:           []paramData{{Name: pName, Type: pType, FieldType: field.Type}},
+			FormatExpr:       paramResult.Expr,
+			EntityFormatExpr: entityResult.Expr,
+			FieldRefNames:    []string{pName},
+			UsesFmt:          paramResult.UsesFmt || entityResult.UsesFmt,
+			UsesStrconv:      paramResult.UsesStrconv || entityResult.UsesStrconv,
+			UsesTime:         pType == "time.Time" || paramResult.UsesTime || entityResult.UsesTime,
+		}, nil
+	}
+
+	// Handle Format pattern
+	if vd.Format == nil {
+		return keyData{}, fmt.Errorf("ValDef has no value source")
+	}
+	spec := vd.Format
+
+	if spec.IsConstant() {
+		formatExpr := fmt.Sprintf("%q", spec.Raw)
+		if spec.Kind == val.SpecKindB {
+			decoded, err := base64.StdEncoding.DecodeString(spec.Raw)
 			if err != nil {
 				return keyData{}, fmt.Errorf("invalid base64 for bytes key: %w", err)
 			}
@@ -243,7 +312,7 @@ func buildKeyData(kp keyPattern, tagMap map[string]fieldInfo, isSortKey bool, en
 			FormatExpr:       formatExpr,
 			EntityFormatExpr: formatExpr,
 			IsConstant:       true,
-			LiteralPrefix:    kp.Pattern,
+			LiteralPrefix:    spec.Raw,
 		}, nil
 	}
 
@@ -251,7 +320,7 @@ func buildKeyData(kp keyPattern, tagMap map[string]fieldInfo, isSortKey bool, en
 	var formatParts, entityFormatParts []string
 	var fieldRefNames []string
 	usesStrconv, usesTime, usesFmt := false, false, false
-	literalPrefix := spec.literalPrefix()
+	literalPrefix := spec.LiteralPrefix()
 
 	for _, part := range spec.Parts {
 		if part.IsLiteral {
@@ -263,7 +332,7 @@ func buildKeyData(kp keyPattern, tagMap map[string]fieldInfo, isSortKey bool, en
 		if !ok {
 			return keyData{}, fmt.Errorf("no struct field found with tag %q", part.Value)
 		}
-		pName := part.paramName()
+		pName := part.ParamName()
 		pType := goParamType(field.Type)
 		if pType == "time.Time" {
 			usesTime = true
@@ -337,7 +406,7 @@ func buildSKBoundExpr(kd keyData, suffix string) string {
 	if len(kd.Params) == 1 {
 		p := kd.Params[0]
 		paramName := p.Name + suffix
-		sp := specPart{Value: p.Name, Formats: p.Formats, PrintfSpec: p.PrintfSpec}
+		sp := val.SpecPart{Value: p.Name, Formats: p.Formats, PrintfSpec: p.PrintfSpec}
 		result, err := generateConversionExpr(sp, paramName, p.FieldType)
 		if err != nil {
 			return fmt.Sprintf("fmt.Sprintf(\"%%v\", %s)", paramName)
@@ -353,7 +422,7 @@ func buildSKBoundExpr(kd keyData, suffix string) string {
 	}
 	for _, p := range kd.Params {
 		paramName := p.Name + suffix
-		sp := specPart{Value: p.Name, Formats: p.Formats, PrintfSpec: p.PrintfSpec}
+		sp := val.SpecPart{Value: p.Name, Formats: p.Formats, PrintfSpec: p.PrintfSpec}
 		result, err := generateConversionExpr(sp, paramName, p.FieldType)
 		if err != nil {
 			parts = append(parts, fmt.Sprintf("fmt.Sprintf(\"%%v\", %s)", paramName))

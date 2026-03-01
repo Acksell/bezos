@@ -1,5 +1,7 @@
 package ddbgen
 
+import "github.com/acksell/bezos/dynamodb/index/val"
+
 // =============================================================================
 // Loader output types (JSON-serialized from the loader sidecar)
 // =============================================================================
@@ -13,27 +15,21 @@ type indexInfo struct {
 	TableName    string      `json:"tableName"`
 	PKDefName    string      `json:"pkDefName"`
 	SKDefName    string      `json:"skDefName"`
-	PartitionKey keyPattern  `json:"partitionKey"`
-	SortKey      keyPattern  `json:"sortKey"`
+	PartitionKey val.ValDef  `json:"partitionKey"`
+	SortKey      *val.ValDef `json:"sortKey,omitempty"`
 	GSIs         []gsiInfo   `json:"gsis,omitempty"`
 	IsVersioned  bool        `json:"isVersioned"`
 	Fields       []fieldInfo `json:"fields"`
 }
 
-// keyPattern is a key's raw format string and DynamoDB attribute type.
-type keyPattern struct {
-	Pattern string `json:"pattern"`
-	Kind    string `json:"kind"` // "S", "N", "B"
-}
-
 // gsiInfo holds runtime GSI data extracted from a SecondaryIndex.
 type gsiInfo struct {
-	Name      string     `json:"name"`
-	Index     int        `json:"index"`
-	PKDef     string     `json:"pkDef"`
-	PKPattern keyPattern `json:"pkPattern"`
-	SKDef     string     `json:"skDef"`
-	SKPattern keyPattern `json:"skPattern"`
+	Name      string      `json:"name"`
+	Index     int         `json:"index"`
+	PKDef     string      `json:"pkDef"`
+	PKPattern val.ValDef  `json:"pkPattern"`
+	SKDef     string      `json:"skDef"`
+	SKPattern *val.ValDef `json:"skPattern,omitempty"`
 }
 
 // fieldInfo mirrors discover.FieldInfo but with JSON tags for serialization.

@@ -19,13 +19,13 @@ import (
 //	}
 type PrimaryIndex[E any] struct {
 	// Table is the underlying table definition (contains key definitions)
-	Table table.TableDefinition
+	Table table.TableDefinition `json:"table"`
 	// PartitionKey is the value definition for the partition key
-	PartitionKey val.ValDef
+	PartitionKey val.ValDef `json:"partitionKey"`
 	// SortKey is the value definition for the sort key (nil if no sort key)
-	SortKey *val.ValDef
+	SortKey *val.ValDef `json:"sortKey,omitempty"`
 	// Secondary are the Global Secondary Indexes associated with this table
-	Secondary []SecondaryIndex
+	Secondary []SecondaryIndex `json:"secondary,omitempty"`
 }
 
 // TableName returns the table name.

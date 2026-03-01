@@ -2,10 +2,12 @@ package ddbgen
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/acksell/bezos/dynamodb/index/val"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,6 +60,40 @@ type schemaRoot struct {
 }
 
 // =============================================================================
+// ValDef helpers
+// =============================================================================
+
+// valDefPattern extracts a pattern string from a ValDef for schema display.
+func valDefPattern(vd val.ValDef) string {
+	if vd.Format != nil {
+		return vd.Format.Raw
+	}
+	if vd.FromField != "" {
+		return "{" + vd.FromField + "}"
+	}
+	if vd.Const != nil {
+		if vd.Const.Kind == val.SpecKindB {
+			if b, ok := vd.Const.Value.([]byte); ok {
+				return base64.StdEncoding.EncodeToString(b)
+			}
+		}
+		return fmt.Sprintf("%v", vd.Const.Value)
+	}
+	return ""
+}
+
+// valDefKind extracts the DynamoDB attribute type from a ValDef.
+func valDefKind(vd val.ValDef) string {
+	if vd.Format != nil {
+		return string(vd.Format.Kind)
+	}
+	if vd.Const != nil {
+		return string(vd.Const.Kind)
+	}
+	return "S" // Default for FromField
+}
+
+// =============================================================================
 // Schema generation
 // =============================================================================
 
@@ -82,37 +118,37 @@ func generateSchemaFiles(schemaDir string, indexes []indexInfo) error {
 		firstIdx := idxs[0]
 		tbl := schemaTable{
 			Name:         tableName,
-			PartitionKey: schemaKeyDef{Name: firstIdx.PKDefName, Kind: firstIdx.PartitionKey.Kind},
+			PartitionKey: schemaKeyDef{Name: firstIdx.PKDefName, Kind: valDefKind(firstIdx.PartitionKey)},
 		}
-		if firstIdx.SortKey.Pattern != "" {
-			tbl.SortKey = &schemaKeyDef{Name: firstIdx.SKDefName, Kind: firstIdx.SortKey.Kind}
+		if firstIdx.SortKey != nil && !firstIdx.SortKey.IsZero() {
+			tbl.SortKey = &schemaKeyDef{Name: firstIdx.SKDefName, Kind: valDefKind(*firstIdx.SortKey)}
 		}
 		for _, gsi := range firstIdx.GSIs {
 			g := schemaGSI{
 				Name:         gsi.Name,
-				PartitionKey: schemaKeyDef{Name: gsi.PKDef, Kind: gsi.PKPattern.Kind},
+				PartitionKey: schemaKeyDef{Name: gsi.PKDef, Kind: valDefKind(gsi.PKPattern)},
 			}
-			if gsi.SKPattern.Pattern != "" {
-				g.SortKey = &schemaKeyDef{Name: gsi.SKDef, Kind: gsi.SKPattern.Kind}
+			if gsi.SKPattern != nil && !gsi.SKPattern.IsZero() {
+				g.SortKey = &schemaKeyDef{Name: gsi.SKDef, Kind: valDefKind(*gsi.SKPattern)}
 			}
 			tbl.GSIs = append(tbl.GSIs, g)
 		}
 		for _, idx := range idxs {
 			entity := schemaEntity{
 				Type:                idx.EntityType,
-				PartitionKeyPattern: idx.PartitionKey.Pattern,
+				PartitionKeyPattern: valDefPattern(idx.PartitionKey),
 				IsVersioned:         idx.IsVersioned,
 			}
-			if idx.SortKey.Pattern != "" {
-				entity.SortKeyPattern = idx.SortKey.Pattern
+			if idx.SortKey != nil && !idx.SortKey.IsZero() {
+				entity.SortKeyPattern = valDefPattern(*idx.SortKey)
 			}
 			for _, f := range idx.Fields {
 				entity.Fields = append(entity.Fields, schemaField{Name: f.Name, Tag: f.Tag, Type: f.Type})
 			}
 			for _, gsi := range idx.GSIs {
-				mapping := schemaGSIMap{GSI: gsi.Name, PartitionPattern: gsi.PKPattern.Pattern}
-				if gsi.SKPattern.Pattern != "" {
-					mapping.SortPattern = gsi.SKPattern.Pattern
+				mapping := schemaGSIMap{GSI: gsi.Name, PartitionPattern: valDefPattern(gsi.PKPattern)}
+				if gsi.SKPattern != nil && !gsi.SKPattern.IsZero() {
+					mapping.SortPattern = valDefPattern(*gsi.SKPattern)
 				}
 				entity.GSIMappings = append(entity.GSIMappings, mapping)
 			}

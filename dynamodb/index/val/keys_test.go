@@ -160,8 +160,8 @@ func TestConstantConstructors(t *testing.T) {
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}
-		if v.Const.Value() != "PROFILE" {
-			t.Errorf("Value() = %v, want %q", v.Const.Value(), "PROFILE")
+		if v.Const.Value != "PROFILE" {
+			t.Errorf("Value = %v, want %q", v.Const.Value, "PROFILE")
 		}
 	})
 
@@ -170,8 +170,8 @@ func TestConstantConstructors(t *testing.T) {
 		if v.Const == nil {
 			t.Fatal("Const should not be nil")
 		}
-		if v.Const.Value() != 42 {
-			t.Errorf("Value() = %v, want %d", v.Const.Value(), 42)
+		if v.Const.Value != 42 {
+			t.Errorf("Value = %v, want %d", v.Const.Value, 42)
 		}
 	})
 
