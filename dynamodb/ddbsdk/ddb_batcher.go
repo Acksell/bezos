@@ -38,7 +38,7 @@ type batcher struct {
 var _ Batcher = &batcher{}
 
 // AddAction adds BatchActions (Put or Delete) to the batch.
-// Any errors are accumulated and returned by [Exec] or [ExecAndRetry].
+// Any errors are accumulated and returned by [ExecChunk] or [ExecAll].
 //
 // Note: Batch operations do not support conditions, nor Update actions.
 func (b *batcher) AddAction(actions ...BatchAction) {
@@ -75,9 +75,10 @@ func (b *batcher) AddAction(actions ...BatchAction) {
 	}
 }
 
-// Exec attempts to write all pending items once (no retries).
-// Returns [ExecResult] with any unprocessed items.
-func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
+// ExecChunk sends the next batch of items (up to 25 per table).
+// Returns [ExecResult] with any remaining pending items for the next chunk.
+// Most callers should use [ExecAll] instead.
+func (b *batcher) ExecChunk(ctx context.Context) (ExecResult, error) {
 	if len(b.errs) > 0 {
 		return ExecResult{Unprocessed: b.pending, Retries: b.retries}, errors.Join(b.errs...)
 	}
@@ -85,8 +86,21 @@ func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
 		return ExecResult{Retries: b.retries}, nil
 	}
 
+	// Chunk to 25 items per table (DynamoDB batch limit)
+	toBatch := make(map[string][]types.WriteRequest)
+	remaining := make(map[string][]types.WriteRequest)
+
+	for table, reqs := range b.pending {
+		if len(reqs) > 25 {
+			toBatch[table] = reqs[:25]
+			remaining[table] = reqs[25:]
+		} else {
+			toBatch[table] = reqs
+		}
+	}
+
 	res, err := b.awsddb.BatchWriteItem(ctx, &dynamodbv2.BatchWriteItemInput{
-		RequestItems: b.pending,
+		RequestItems: toBatch,
 	})
 	if err != nil {
 		return ExecResult{
@@ -95,7 +109,12 @@ func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
 		}, fmt.Errorf("batch write failed: %w", err)
 	}
 
-	b.pending = res.UnprocessedItems
+	// Combine remaining items with unprocessed items from this chunk
+	b.pending = remaining
+	for table, reqs := range res.UnprocessedItems {
+		b.pending[table] = append(b.pending[table], reqs...)
+	}
+
 	b.retries++
 
 	return ExecResult{
@@ -104,7 +123,7 @@ func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
 	}, nil
 }
 
-// ExecAndRetry writes all pending items, retrying until complete or limits exceeded.
+// ExecAll writes all pending items, chunking as needed and retrying until complete or limits exceeded.
 // At least one of [WithMaxRetries] or [WithTimeout] must be configured.
 // Uses exponential backoff by default (50ms, 100ms, 200ms, ...), override with [WithCustomBackoff].
 //
@@ -114,12 +133,12 @@ func (b *batcher) Exec(ctx context.Context) (ExecResult, error) {
 //		ddbsdk.WithMaxRetries(5),
 //	    ddbsdk.WithTimeout(5*time.Second))
 //	batch.AddAction(putUser, putOrder, deleteOldItem)
-//	if err := batch.ExecAndRetry(ctx); err != nil {
+//	if err := batch.ExecAll(ctx); err != nil {
 //	    return err
 //	}
-func (b *batcher) ExecAndRetry(ctx context.Context) error {
+func (b *batcher) ExecAll(ctx context.Context) error {
 	if b.opts.maxRetries == 0 && b.opts.timeout == 0 {
-		return fmt.Errorf("ExecAndRetry requires WithMaxRetries or WithTimeout to be configured")
+		return fmt.Errorf("ExecAll requires WithMaxRetries or WithTimeout to be configured")
 	}
 	if b.opts.timeout > 0 {
 		var cancel context.CancelFunc
@@ -127,7 +146,7 @@ func (b *batcher) ExecAndRetry(ctx context.Context) error {
 		defer cancel()
 	}
 	for {
-		res, err := b.Exec(ctx)
+		res, err := b.ExecChunk(ctx)
 		if err != nil {
 			return err
 		}
@@ -223,7 +242,7 @@ type BatchOption func(*batchOpts)
 // BackoffFunc returns the duration to wait before retry attempt n.
 type BackoffFunc func(attempt int) time.Duration
 
-// WithMaxRetries sets the maximum number of retry attempts for [ExecAndRetry].
+// WithMaxRetries sets the maximum number of retry attempts for [ExecAll].
 func WithMaxRetries(n int) BatchOption {
 	return func(o *batchOpts) {
 		o.maxRetries = n

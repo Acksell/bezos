@@ -39,8 +39,8 @@ type Batcher interface {
 	// AddAction appends one or more actions to the batch.
 	// Batch only supports Put and Delete actions, without conditions.
 	AddAction(...BatchAction)
-	Exec(context.Context) (ExecResult, error)
-	ExecAndRetry(context.Context) error
+	ExecChunk(context.Context) (ExecResult, error)
+	ExecAll(context.Context) error
 }
 
 // ConsistentReads are enabled by default.

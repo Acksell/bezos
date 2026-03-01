@@ -44,9 +44,9 @@ func TestBatcher_PutItems(t *testing.T) {
 	}
 
 	// Execute batch
-	result, err := batch.Exec(ctx)
+	result, err := batch.ExecChunk(ctx)
 	if err != nil {
-		t.Fatalf("Batch Exec failed: %v", err)
+		t.Fatalf("Batch ExecChunk failed: %v", err)
 	}
 
 	if !result.Done() {
@@ -99,9 +99,9 @@ func TestBatcher_DeleteItems(t *testing.T) {
 	}
 
 	// Execute batch
-	result, err := batch.Exec(ctx)
+	result, err := batch.ExecChunk(ctx)
 	if err != nil {
-		t.Fatalf("Batch Exec failed: %v", err)
+		t.Fatalf("Batch ExecChunk failed: %v", err)
 	}
 
 	if !result.Done() {
@@ -164,9 +164,9 @@ func TestBatcher_MixedPutAndDelete(t *testing.T) {
 	batch.AddAction(NewDelete(batchTestTable, deletePK))
 
 	// Execute batch
-	result, err := batch.Exec(ctx)
+	result, err := batch.ExecChunk(ctx)
 	if err != nil {
-		t.Fatalf("Batch Exec failed: %v", err)
+		t.Fatalf("Batch ExecChunk failed: %v", err)
 	}
 
 	if !result.Done() {
@@ -233,7 +233,7 @@ func TestBatcher_DuplicateKey_Fails(t *testing.T) {
 	batch.AddAction(NewUnsafePut(batchTestTable, pk, &item))
 
 	// Execute should fail due to duplicate detection in batcher
-	_, err := batch.Exec(ctx)
+	_, err := batch.ExecChunk(ctx)
 	// Note: Current implementation may not detect duplicates, so this test
 	// may pass even without error. This is a known limitation.
 	if err != nil {
@@ -252,7 +252,7 @@ func TestBatcher_EmptyBatch(t *testing.T) {
 	batch := db.NewBatch()
 
 	// Execute empty batch
-	result, err := batch.Exec(ctx)
+	result, err := batch.ExecChunk(ctx)
 	if err != nil {
 		t.Fatalf("Exec failed: %v", err)
 	}
