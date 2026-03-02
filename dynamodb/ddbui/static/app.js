@@ -269,9 +269,6 @@
 
             // Render schema
             renderSchema();
-
-            // Populate query index dropdown
-            populateIndexDropdown();
             
             // Populate entity dropdown for queries
             populateEntityDropdown();
@@ -384,30 +381,19 @@
         }
     }
 
-    // Populate index dropdown for queries
-    function populateIndexDropdown() {
-        const select = $('#query-index');
-        select.innerHTML = '<option value="">Primary Index</option>';
-        
-        const gsis = state.currentSchema?.table?.gsis || [];
-        gsis.forEach(gsi => {
-            select.innerHTML += `<option value="${gsi.name}">${gsi.name}</option>`;
-        });
-    }
-
     // Populate entity dropdown for queries and render dynamic form
     function populateEntityDropdown() {
         const select = $('#query-entity');
         if (!select) return;
         
         const entities = state.currentSchema?.entities || [];
-        select.innerHTML = '<option value="">-- Select Entity --</option>';
+        select.innerHTML = '<option value="__any__">-- Any --</option>';
         entities.forEach(e => {
             select.innerHTML += `<option value="${e.type}">${e.type}</option>`;
         });
         
-        // Clear the dynamic fields
-        renderEntityQueryFields(null);
+        // Render the "any" query fields by default
+        renderEntityQueryFields('__any__');
     }
 
     // Render entity query form fields based on selected entity
@@ -417,6 +403,12 @@
         
         if (!entityType) {
             container.innerHTML = '<p class="placeholder">Select an entity to see query fields</p>';
+            return;
+        }
+        
+        // "Any" mode - show raw query fields (like advanced query)
+        if (entityType === '__any__') {
+            renderAnyQueryFields(container);
             return;
         }
         
@@ -517,11 +509,80 @@
         }
     }
 
+    // Render "Any" query fields - raw PK/SK inputs with index selection
+    function renderAnyQueryFields(container) {
+        const schema = state.currentSchema;
+        if (!schema) return;
+        
+        const gsis = schema.table.gsis || [];
+        
+        let html = '';
+        
+        // Index selector
+        html += `<div class="form-group">
+            <label for="any-query-index">Index:</label>
+            <select id="any-query-index">
+                <option value="">Primary Index</option>
+                ${gsis.map(g => `<option value="${g.name}">${g.name}</option>`).join('')}
+            </select>
+        </div>`;
+        
+        // PK input
+        html += `<div class="form-group">
+            <label for="any-query-pk">Partition Key Value:</label>
+            <input type="text" id="any-query-pk" placeholder="e.g., USER#123">
+        </div>`;
+        
+        // SK condition
+        html += `<div class="form-group">
+            <label for="any-query-sk-op">Sort Key Condition:</label>
+            <div class="inline-group">
+                <select id="any-query-sk-op">
+                    <option value="">None</option>
+                    <option value="=">=</option>
+                    <option value="begins_with">begins_with</option>
+                    <option value="<">&lt;</option>
+                    <option value="<=">&lt;=</option>
+                    <option value=">">&gt;</option>
+                    <option value=">=">&gt;=</option>
+                    <option value="between">between</option>
+                </select>
+                <input type="text" id="any-query-sk-val" placeholder="Sort key value">
+                <input type="text" id="any-query-sk-val2" placeholder="End value" style="display:none">
+            </div>
+        </div>`;
+        
+        html += `<button id="btn-entity-query" class="btn btn-primary">Run Query</button>`;
+        
+        container.innerHTML = html;
+        
+        // SK operator change - show/hide second value input
+        const skOpSelect = $('#any-query-sk-op');
+        if (skOpSelect) {
+            skOpSelect.addEventListener('change', (e) => {
+                const val2 = $('#any-query-sk-val2');
+                if (val2) val2.style.display = e.target.value === 'between' ? 'block' : 'none';
+            });
+        }
+        
+        // Re-attach event listener for the button
+        const btn = $('#btn-entity-query');
+        if (btn) {
+            btn.addEventListener('click', runEntityQuery);
+        }
+    }
+
     // Run query based on entity form
     async function runEntityQuery() {
         const entityType = $('#query-entity')?.value;
         if (!entityType) {
             alert('Please select an entity');
+            return;
+        }
+        
+        // "Any" mode - run raw query
+        if (entityType === '__any__') {
+            await runAnyQuery();
             return;
         }
         
@@ -604,6 +665,83 @@
             case 'S':
             default:
                 return value;
+        }
+    }
+
+    // Run query in "Any" mode - raw PK/SK expression (like advanced query)
+    async function runAnyQuery() {
+        const indexName = $('#any-query-index')?.value || '';
+        const pk = $('#any-query-pk')?.value;
+        const skOp = $('#any-query-sk-op')?.value;
+        const skVal = $('#any-query-sk-val')?.value;
+        const skVal2 = $('#any-query-sk-val2')?.value;
+        
+        if (!pk) {
+            alert('Partition key value is required');
+            return;
+        }
+        
+        const schema = state.currentSchema;
+        let keyDefs;
+        
+        if (indexName) {
+            const gsi = schema.table.gsis.find(g => g.name === indexName);
+            keyDefs = { pk: gsi.partitionKey, sk: gsi.sortKey };
+        } else {
+            keyDefs = { pk: schema.table.partitionKey, sk: schema.table.sortKey };
+        }
+        
+        // Build key condition expression
+        let expr = '#pk = :pk';
+        const names = { '#pk': keyDefs.pk.name };
+        const values = { ':pk': pk };
+        
+        if (skOp && skVal && keyDefs.sk) {
+            names['#sk'] = keyDefs.sk.name;
+            values[':sk'] = skVal;
+            
+            switch (skOp) {
+                case '=':
+                    expr += ' AND #sk = :sk';
+                    break;
+                case 'begins_with':
+                    expr += ' AND begins_with(#sk, :sk)';
+                    break;
+                case '<':
+                    expr += ' AND #sk < :sk';
+                    break;
+                case '<=':
+                    expr += ' AND #sk <= :sk';
+                    break;
+                case '>':
+                    expr += ' AND #sk > :sk';
+                    break;
+                case '>=':
+                    expr += ' AND #sk >= :sk';
+                    break;
+                case 'between':
+                    values[':sk2'] = skVal2;
+                    expr += ' AND #sk BETWEEN :sk AND :sk2';
+                    break;
+            }
+        }
+        
+        const body = {
+            keyConditionExpression: expr,
+            expressionAttributeNames: names,
+            expressionAttributeValues: values,
+            limit: 50
+        };
+        
+        try {
+            const path = indexName
+                ? `/tables/${state.currentTable}/gsi/${indexName}/query`
+                : `/tables/${state.currentTable}/query`;
+            const data = await api.post(path, body);
+            renderQueryResults(data.items);
+        } catch (err) {
+            console.error('Query failed:', err);
+            alert('Query failed: ' + err.message);
         }
     }
 
@@ -982,83 +1120,6 @@
         }
     }
 
-    // Run query
-    async function runQuery() {
-        const indexName = $('#query-index').value;
-        const pk = $('#query-pk').value;
-        const skOp = $('#query-sk-op').value;
-        const skVal = $('#query-sk-val').value;
-        const skVal2 = $('#query-sk-val2').value;
-
-        if (!pk) {
-            alert('Partition key value is required');
-            return;
-        }
-
-        const schema = state.currentSchema;
-        let keyDefs;
-        
-        if (indexName) {
-            const gsi = schema.table.gsis.find(g => g.name === indexName);
-            keyDefs = { pk: gsi.partitionKey, sk: gsi.sortKey };
-        } else {
-            keyDefs = { pk: schema.table.partitionKey, sk: schema.table.sortKey };
-        }
-
-        // Build key condition expression
-        let expr = `#pk = :pk`;
-        const names = { '#pk': keyDefs.pk.name };
-        const values = { ':pk': pk };
-
-        if (skOp && skVal && keyDefs.sk) {
-            names['#sk'] = keyDefs.sk.name;
-            values[':sk'] = skVal;
-
-            switch (skOp) {
-                case '=':
-                    expr += ' AND #sk = :sk';
-                    break;
-                case 'begins_with':
-                    expr += ' AND begins_with(#sk, :sk)';
-                    break;
-                case '<':
-                    expr += ' AND #sk < :sk';
-                    break;
-                case '<=':
-                    expr += ' AND #sk <= :sk';
-                    break;
-                case '>':
-                    expr += ' AND #sk > :sk';
-                    break;
-                case '>=':
-                    expr += ' AND #sk >= :sk';
-                    break;
-                case 'between':
-                    values[':sk2'] = skVal2;
-                    expr += ' AND #sk BETWEEN :sk AND :sk2';
-                    break;
-            }
-        }
-
-        const body = {
-            keyConditionExpression: expr,
-            expressionAttributeNames: names,
-            expressionAttributeValues: values,
-            limit: 50
-        };
-
-        try {
-            const path = indexName 
-                ? `/tables/${state.currentTable}/gsi/${indexName}/query`
-                : `/tables/${state.currentTable}/query`;
-            const data = await api.post(path, body);
-            renderQueryResults(data.items);
-        } catch (err) {
-            console.error('Query failed:', err);
-            alert('Query failed: ' + err.message);
-        }
-    }
-
     // Render query results using table view (similar to scan)
     function renderQueryResults(items) {
         state.queryItems = items;
@@ -1242,7 +1303,25 @@
             const tableLink = e.target.closest('a.table-link');
             if (tableLink) {
                 e.preventDefault();
-                selectTable(tableLink.dataset.table);
+                const clickedTable = tableLink.dataset.table;
+                // If already on query tab for this table, reset to "Any" mode
+                const queryTabActive = $('.tab[data-tab="query"]')?.classList.contains('active');
+                if (queryTabActive && state.currentTable === clickedTable) {
+                    // Reset entity dropdown to "Any"
+                    const entitySelect = $('#query-entity');
+                    if (entitySelect) {
+                        entitySelect.value = '__any__';
+                        renderEntityQueryFields('__any__');
+                    }
+                    // Update sidebar highlighting
+                    $$('.table-list .entity-link').forEach(a => a.classList.remove('active'));
+                    $$('.table-list .table-link').forEach(a => a.classList.remove('active'));
+                    tableLink.classList.add('active');
+                    // Update breadcrumb
+                    $('#table-name').textContent = clickedTable;
+                    return;
+                }
+                selectTable(clickedTable);
             }
         });
 
@@ -1371,21 +1450,6 @@
 
         // Delete item
         $('#btn-delete-item').addEventListener('click', deleteItem);
-
-        // Sort key operator change (for advanced query)
-        const skOpSelect = $('#query-sk-op');
-        if (skOpSelect) {
-            skOpSelect.addEventListener('change', (e) => {
-                const val2 = $('#query-sk-val2');
-                if (val2) val2.style.display = e.target.value === 'between' ? 'block' : 'none';
-            });
-        }
-
-        // Run query (advanced)
-        const runQueryBtn = $('#btn-run-query');
-        if (runQueryBtn) {
-            runQueryBtn.addEventListener('click', runQuery);
-        }
         
         // Query entity selection - update sidebar and breadcrumbs too
         document.addEventListener('change', (e) => {
@@ -1395,13 +1459,14 @@
                 
                 // Update sidebar highlighting
                 $$('.table-list .entity-link').forEach(a => a.classList.remove('active'));
-                if (entityType && state.currentTable) {
+                $$('.table-list .table-link').forEach(a => a.classList.remove('active'));
+                if (entityType && entityType !== '__any__' && state.currentTable) {
                     const entityLink = $(`.entity-link[data-table="${state.currentTable}"][data-entity="${entityType}"]`);
                     if (entityLink) entityLink.classList.add('active');
                     // Update breadcrumb
                     $('#table-name').textContent = `${state.currentTable} / ${entityType}`;
                 } else if (state.currentTable) {
-                    // Reset to table only
+                    // "Any" or no selection - highlight table, show table name only
                     const tableLink = $(`.table-link[data-table="${state.currentTable}"]`);
                     if (tableLink) tableLink.classList.add('active');
                     $('#table-name').textContent = state.currentTable;

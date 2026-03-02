@@ -677,38 +677,6 @@ textarea {
     color: var(--text-primary);
 }
 
-/* Advanced Query (Collapsible) */
-.advanced-query {
-    margin-bottom: 1.5rem;
-}
-
-.advanced-query summary {
-    cursor: pointer;
-    padding: 0.75rem 1rem;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 0.375rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    user-select: none;
-}
-
-.advanced-query summary:hover {
-    background: var(--bg-tertiary);
-}
-
-.advanced-query[open] summary {
-    border-radius: 0.375rem 0.375rem 0 0;
-    border-bottom: none;
-    color: var(--text-primary);
-}
-
-.advanced-query .query-builder {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-    margin-bottom: 0;
-}
-
 /* Pattern Preview */
 .pattern-preview {
     background: var(--bg-tertiary);
