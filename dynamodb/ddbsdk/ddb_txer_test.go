@@ -509,6 +509,117 @@ func TestTransaction_GetItemsTx_WithProjection(t *testing.T) {
 	}
 }
 
+func TestTransaction_ConditionCheck_WithPut_Success(t *testing.T) {
+	db := NewMemoryClient(txTestTable)
+	ctx := context.Background()
+
+	// Create an existing "user" that the condition check will verify
+	user := &testEntity{PK: "user#1", SK: "profile", Name: "Alice"}
+	userPK := txTestKey(user.PK, user.SK)
+	if err := db.PutItem(ctx, NewUnsafePut(txTestTable, userPK, user)); err != nil {
+		t.Fatalf("Initial put failed: %v", err)
+	}
+
+	// Transaction: put a project AND condition-check that the user exists
+	tx := db.NewTx()
+
+	project := &testEntity{PK: "project#1", SK: "meta", Name: "My Project"}
+	projectPK := txTestKey(project.PK, project.SK)
+	put := NewUnsafePut(txTestTable, projectPK, project)
+	tx.AddAction(put)
+
+	check := NewConditionCheck(txTestTable, userPK, expression.AttributeExists(expression.Name("pk")))
+	tx.AddAction(check)
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Transaction commit should succeed: %v", err)
+	}
+
+	// Verify the project was created
+	getter := db.NewLookup()
+	item, err := getter.GetItem(ctx, GetItemRequest{Table: txTestTable, Key: projectPK})
+	if err != nil {
+		t.Fatalf("GetItem failed: %v", err)
+	}
+	if item == nil {
+		t.Fatal("expected project item to exist")
+	}
+}
+
+func TestTransaction_ConditionCheck_WithPut_Failure(t *testing.T) {
+	db := NewMemoryClient(txTestTable)
+	ctx := context.Background()
+
+	// Do NOT create the user — the condition check should fail
+
+	// Transaction: put a project AND condition-check that a non-existent user exists
+	tx := db.NewTx()
+
+	project := &testEntity{PK: "project#1", SK: "meta", Name: "My Project"}
+	projectPK := txTestKey(project.PK, project.SK)
+	put := NewUnsafePut(txTestTable, projectPK, project)
+	tx.AddAction(put)
+
+	nonExistentUserPK := txTestKey("user#999", "profile")
+	check := NewConditionCheck(txTestTable, nonExistentUserPK, expression.AttributeExists(expression.Name("pk")))
+	tx.AddAction(check)
+
+	// Should fail because the user doesn't exist
+	err := tx.Commit(ctx)
+	if err == nil {
+		t.Fatal("expected transaction to fail due to condition check on non-existent item")
+	}
+
+	// Verify the project was NOT created (transaction should have rolled back)
+	getter := db.NewLookup()
+	item, getErr := getter.GetItem(ctx, GetItemRequest{Table: txTestTable, Key: projectPK})
+	if getErr != nil {
+		// not found error is acceptable
+		if item != nil {
+			t.Errorf("expected item to be nil when error occurs, got: %v", item)
+		}
+	} else if item != nil {
+		t.Error("expected project item to NOT exist after failed transaction")
+	}
+}
+
+func TestTransaction_ConditionCheck_Single(t *testing.T) {
+	db := NewMemoryClient(txTestTable)
+	ctx := context.Background()
+
+	// Create an existing item
+	user := &testEntity{PK: "user#1", SK: "profile", Name: "Alice"}
+	userPK := txTestKey(user.PK, user.SK)
+	if err := db.PutItem(ctx, NewUnsafePut(txTestTable, userPK, user)); err != nil {
+		t.Fatalf("Initial put failed: %v", err)
+	}
+
+	// Single ConditionCheck — should route through TransactWriteItems
+	tx := db.NewTx()
+	check := NewConditionCheck(txTestTable, userPK, expression.AttributeExists(expression.Name("pk")))
+	tx.AddAction(check)
+
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("Single ConditionCheck commit should succeed: %v", err)
+	}
+}
+
+func TestTransaction_ConditionCheck_Single_Failure(t *testing.T) {
+	db := NewMemoryClient(txTestTable)
+	ctx := context.Background()
+
+	// Single ConditionCheck on a non-existent item — should fail
+	tx := db.NewTx()
+	nonExistentPK := txTestKey("user#999", "profile")
+	check := NewConditionCheck(txTestTable, nonExistentPK, expression.AttributeExists(expression.Name("pk")))
+	tx.AddAction(check)
+
+	err := tx.Commit(ctx)
+	if err == nil {
+		t.Fatal("expected single ConditionCheck to fail on non-existent item")
+	}
+}
+
 func TestTransaction_GetItemsTx_TooManyItems(t *testing.T) {
 	db := NewMemoryClient(txTestTable)
 	ctx := context.Background()

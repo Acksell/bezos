@@ -1,6 +1,8 @@
 // Package schema defines the data types for DynamoDB table and entity schemas.
-// These types are used by ddbgen for code generation output and by ddbui for
-// runtime schema introspection. The types are pure data structures with no methods.
+// These types are used by ddbui for introspecting entities, indices and tables.
+//
+// Could also be used for detecting breaking changes / schema management,
+// although we'd probably want to use a more conventional schema format then.
 package schema
 
 // Schema is the root type containing all table definitions.

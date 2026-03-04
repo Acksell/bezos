@@ -26,6 +26,9 @@ var _ Action = &DeleteWithCondition{}
 // Update
 var _ Action = &UnsafeUpdate{}
 
+// ConditionCheck
+var _ Action = &ConditionCheck{}
+
 // BatchAction represents actions that can be used with BatchWriteItem.
 // Only Put and Delete are supported (not UnsafeUpdate or PutWithCondition).
 // The private batchWritable() method restricts implementations to this package.
@@ -79,5 +82,15 @@ type UnsafeUpdate struct {
 	allowNonIdempotent bool
 
 	u expression2.UpdateBuilder
+	c expression2.ConditionBuilder
+}
+
+// ConditionCheck asserts a condition on an existing item without modifying it.
+// It can only be used within a transaction (TransactWriteItems).
+// Use this for referential integrity checks, e.g. ensuring a referenced item exists.
+type ConditionCheck struct {
+	Table table.TableDefinition
+	Key   table.PrimaryKey
+
 	c expression2.ConditionBuilder
 }

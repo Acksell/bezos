@@ -100,6 +100,16 @@ func (idx *{{$idx.Name}}IndexUtil) UnsafeUpdate({{allParams $idx}}) *ddbsdk.Unsa
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey({{allArgs $idx}}))
 }
 
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *{{$idx.Name}}IndexUtil) EnsureExists({{allParams $idx}}) *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey({{allArgs $idx}}),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
+}
+
 {{range $gsi := $idx.GSIs}}
 // {{$gsi.Name}}Key creates a key for querying the {{$gsi.Name}} GSI.
 func (idx *{{$idx.Name}}IndexUtil) {{$gsi.Name}}Key({{gsiAllParams $gsi}}) table.PrimaryKey {

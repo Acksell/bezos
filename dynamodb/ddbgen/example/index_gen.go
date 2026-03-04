@@ -8,6 +8,7 @@ import (
 	"github.com/acksell/bezos/dynamodb/index"
 	"github.com/acksell/bezos/dynamodb/index/indices"
 	"github.com/acksell/bezos/dynamodb/table"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
 	"strconv"
 	"sync"
 	"time"
@@ -67,6 +68,16 @@ func (idx *OrderIndexUtil) Delete(tenantID string, orderID string) *ddbsdk.Delet
 // UnsafeUpdate creates an Update operation without optimistic locking.
 func (idx *OrderIndexUtil) UnsafeUpdate(tenantID string, orderID string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(tenantID, orderID))
+}
+
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *OrderIndexUtil) EnsureExists(tenantID string, orderID string) *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey(tenantID, orderID),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
 }
 
 // -------------------------------------------------------------------------
@@ -181,6 +192,16 @@ func (idx *MessageIndexUtil) UnsafeUpdate(chatID string, sequenceNum int64) *ddb
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(chatID, sequenceNum))
 }
 
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *MessageIndexUtil) EnsureExists(chatID string, sequenceNum int64) *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey(chatID, sequenceNum),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
+}
+
 // -------------------------------------------------------------------------
 // Primary Index Query Builder
 // -------------------------------------------------------------------------
@@ -291,6 +312,16 @@ func (idx *EventIndexUtil) Delete(eventID string, timestamp time.Time) *ddbsdk.D
 // UnsafeUpdate creates an Update operation without optimistic locking.
 func (idx *EventIndexUtil) UnsafeUpdate(eventID string, timestamp time.Time) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(eventID, timestamp))
+}
+
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *EventIndexUtil) EnsureExists(eventID string, timestamp time.Time) *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey(eventID, timestamp),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
 }
 
 // -------------------------------------------------------------------------
@@ -416,6 +447,16 @@ func (idx *RandomEntityIndexUtil) Delete() *ddbsdk.Delete {
 // UnsafeUpdate creates an Update operation without optimistic locking.
 func (idx *RandomEntityIndexUtil) UnsafeUpdate() *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey())
+}
+
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *RandomEntityIndexUtil) EnsureExists() *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey(),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
 }
 
 // GSI1Key creates a key for querying the GSI1 GSI.
@@ -586,6 +627,16 @@ func (idx *UserIndexUtil) Delete(id string) *ddbsdk.Delete {
 // UnsafeUpdate creates an Update operation without optimistic locking.
 func (idx *UserIndexUtil) UnsafeUpdate(id string) *ddbsdk.UnsafeUpdate {
 	return ddbsdk.NewUnsafeUpdate(idx.Definition().Table, idx.PrimaryKey(id))
+}
+
+// EnsureExists creates a ConditionCheck that asserts an item with this primary key exists.
+// Use this in transactions for referential integrity checks.
+func (idx *UserIndexUtil) EnsureExists(id string) *ddbsdk.ConditionCheck {
+	return ddbsdk.NewConditionCheck(
+		idx.Definition().Table,
+		idx.PrimaryKey(id),
+		expression.AttributeExists(expression.Name(idx.Definition().Table.KeyDefinitions.PartitionKey.Name)),
+	)
 }
 
 // GSI1Key creates a key for querying the GSI1 GSI.

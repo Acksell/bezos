@@ -630,6 +630,7 @@ func generateCode(packageName string, indexes []indexInfo) ([]byte, error) {
 		`"github.com/acksell/bezos/dynamodb/index"`,
 		`"github.com/acksell/bezos/dynamodb/index/indices"`,
 		`"github.com/acksell/bezos/dynamodb/table"`,
+		`"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"`,
 	}
 	if needsFmt {
 		imports = append([]string{`"fmt"`}, imports...)

@@ -86,6 +86,20 @@ func (tx *txer) Commit(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to delete item: %w", err)
 				}
+			case *ConditionCheck:
+				// ConditionCheck has no standalone API, use TransactWriteItems
+				twi, err := a.ToTransactWriteItem()
+				if err != nil {
+					return fmt.Errorf("failed to convert condition check to transact write item: %w", err)
+				}
+				params := &dynamodbv2.TransactWriteItemsInput{
+					TransactItems:      []types.TransactWriteItem{twi},
+					ClientRequestToken: &tx.opts.idempotencyToken,
+				}
+				_, err = tx.awsddb.TransactWriteItems(ctx, params)
+				if err != nil {
+					return fmt.Errorf("failed to transact write items: %w", err)
+				}
 			default:
 				return fmt.Errorf("unknown operation type: %T", a)
 			}
