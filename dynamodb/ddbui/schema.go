@@ -33,6 +33,15 @@ type EnrichedEntity struct {
 	// Parsed pattern info for UI - computed at load time
 	PartitionKeyParsed *ParsedPattern `json:"partitionKeyParsed,omitempty"`
 	SortKeyParsed      *ParsedPattern `json:"sortKeyParsed,omitempty"`
+	// Parsed GSI mapping patterns for UI - computed at load time
+	EnrichedGSIMappings []EnrichedGSIMapping `json:"enrichedGSIMappings,omitempty"`
+}
+
+// EnrichedGSIMapping wraps a schema.GSIMapping with parsed pattern information.
+type EnrichedGSIMapping struct {
+	schema.GSIMapping
+	PartitionParsed *ParsedPattern `json:"partitionParsed,omitempty"`
+	SortParsed      *ParsedPattern `json:"sortParsed,omitempty"`
 }
 
 // ParsedPattern represents a parsed key pattern with its parts.
@@ -187,6 +196,18 @@ func enrichEntity(entity schema.Entity) EnrichedEntity {
 	}
 	if entity.SortKeyPattern != "" {
 		enriched.SortKeyParsed = parsePattern(entity.SortKeyPattern, fieldTypes)
+	}
+
+	// Parse GSI mapping patterns
+	for _, m := range entity.GSIMappings {
+		em := EnrichedGSIMapping{GSIMapping: m}
+		if m.PartitionPattern != "" {
+			em.PartitionParsed = parsePattern(m.PartitionPattern, fieldTypes)
+		}
+		if m.SortPattern != "" {
+			em.SortParsed = parsePattern(m.SortPattern, fieldTypes)
+		}
+		enriched.EnrichedGSIMappings = append(enriched.EnrichedGSIMappings, em)
 	}
 
 	return enriched

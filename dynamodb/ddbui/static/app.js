@@ -13,7 +13,8 @@
         lastKey: null,
         loading: false,
         selectedIndices: new Set(),
-        selectedQueryIndices: new Set()
+        selectedQueryIndices: new Set(),
+        selectedQueryIndex: ''  // currently selected index for entity query ('' = primary)
     };
 
     // Pattern utilities - uses parsed patterns from backend
@@ -21,6 +22,12 @@
     
     function escapeRegex(str) {
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    // Highlight {variables} in a pattern string with light blue color
+    function highlightPatternVars(pattern) {
+        if (!pattern) return '';
+        return pattern.replace(/\{([^}]+)\}/g, '<span class="pattern-var">{$1}</span>');
     }
 
     // Build a regex from parsed pattern parts (from backend)
@@ -76,6 +83,28 @@
             // Variable reference - use the value from input
             return values[part.value] || '';
         }).join('');
+    }
+
+    // Build a key value for prefix/begins_with queries - stops at first empty variable
+    // This avoids the bug where "chat#{tenantID}#{id}" with empty tenantID becomes "chat##"
+    // instead of just "chat#"
+    function buildPrefixFromParsedPattern(parsedPattern, values) {
+        if (!parsedPattern || !parsedPattern.parts) return '';
+        
+        let result = '';
+        for (const part of parsedPattern.parts) {
+            if (part.isLiteral) {
+                result += part.value;
+            } else {
+                // Variable - if empty, stop here (don't include trailing separators)
+                const val = values[part.value] || '';
+                if (val === '') {
+                    break;
+                }
+                result += val;
+            }
+        }
+        return result;
     }
 
     // Get variable names from a parsed pattern
@@ -260,6 +289,7 @@
                 state.items = [];
                 state.lastKey = null;
                 state.selectedIndices.clear();
+                state.selectedQueryIndex = '';
             }
 
             // Update UI
@@ -344,12 +374,12 @@
                     <h4>${entity.type}${entity.isVersioned ? ' (versioned)' : ''}</h4>
                     <div class="schema-row">
                         <span class="schema-label">PK Pattern:</span>
-                        <span class="schema-value">${entity.partitionKeyPattern}</span>
+                        <span class="schema-value">${highlightPatternVars(entity.partitionKeyPattern)}</span>
                     </div>
                     ${entity.sortKeyPattern ? `
                     <div class="schema-row">
                         <span class="schema-label">SK Pattern:</span>
-                        <span class="schema-value">${entity.sortKeyPattern}</span>
+                        <span class="schema-value">${highlightPatternVars(entity.sortKeyPattern)}</span>
                     </div>` : ''}
                     ${entity.gsiMappings && entity.gsiMappings.length > 0 ? `
                     <div class="entity-fields">
@@ -359,7 +389,7 @@
                         ${entity.gsiMappings.map(m => `
                         <div class="schema-row" style="margin-left: 1rem;">
                             <span class="schema-label">${m.gsi}:</span>
-                            <span class="schema-value">${m.partitionPattern}${m.sortPattern ? ' / ' + m.sortPattern : ''}</span>
+                            <span class="schema-value">${highlightPatternVars(m.partitionPattern)}${m.sortPattern ? ' / ' + highlightPatternVars(m.sortPattern) : ''}</span>
                         </div>
                         `).join('')}
                     </div>` : ''}
@@ -418,19 +448,67 @@
             return;
         }
         
-        // Use backend-parsed patterns
-        const pkParsed = entity.partitionKeyParsed;
-        const skParsed = entity.sortKeyParsed;
+        // Get the selected index (default: primary)
+        const selectedIndex = state.selectedQueryIndex || '';
+        
+        // Determine which parsed patterns to use based on selected index
+        let pkParsed, skParsed, pkPatternDisplay, skPatternDisplay;
+        if (selectedIndex) {
+            // Find the GSI mapping for this entity
+            const gsiMapping = (entity.enrichedGSIMappings || []).find(m => m.gsi === selectedIndex);
+            if (gsiMapping) {
+                pkParsed = gsiMapping.partitionParsed;
+                skParsed = gsiMapping.sortParsed;
+                pkPatternDisplay = gsiMapping.partitionPattern;
+                skPatternDisplay = gsiMapping.sortPattern;
+            } else {
+                // Entity doesn't have a mapping for this GSI
+                pkParsed = null;
+                skParsed = null;
+                pkPatternDisplay = null;
+                skPatternDisplay = null;
+            }
+        } else {
+            // Use backend-parsed patterns for primary index
+            pkParsed = entity.partitionKeyParsed;
+            skParsed = entity.sortKeyParsed;
+            pkPatternDisplay = entity.partitionKeyPattern;
+            skPatternDisplay = entity.sortKeyPattern;
+        }
+        
+        // Build list of available indexes for this entity
+        const gsiMappings = entity.enrichedGSIMappings || [];
         
         let html = '';
         
-        // Pattern preview
-        html += `<div class="pattern-preview">`;
-        html += `<div class="pattern-item"><span class="pattern-label">PK:</span> <code>${entity.partitionKeyPattern}</code></div>`;
-        if (entity.sortKeyPattern) {
-            html += `<div class="pattern-item"><span class="pattern-label">SK:</span> <code>${entity.sortKeyPattern}</code></div>`;
+        // Index selector (only show if entity has GSI mappings)
+        if (gsiMappings.length > 0) {
+            html += `<div class="form-group">
+                <label for="entity-query-index">Index:</label>
+                <select id="entity-query-index">
+                    <option value="">Primary Index</option>
+                    ${gsiMappings.map(m => `<option value="${m.gsi}"${m.gsi === selectedIndex ? ' selected' : ''}>${m.gsi}</option>`).join('')}
+                </select>
+            </div>`;
         }
-        html += `</div>`;
+        
+        // If a GSI is selected but entity has no mapping for it, show message
+        if (selectedIndex && !pkParsed) {
+            html += `<p class="placeholder">This entity has no mapping for index "${selectedIndex}"</p>`;
+            container.innerHTML = html;
+            attachIndexChangeListener(entityType);
+            return;
+        }
+        
+        // Pattern preview
+        if (pkPatternDisplay) {
+            html += `<div class="pattern-preview">`;
+            html += `<div class="pattern-item"><span class="pattern-label">PK:</span> <code>${highlightPatternVars(pkPatternDisplay)}</code></div>`;
+            if (skPatternDisplay) {
+                html += `<div class="pattern-item"><span class="pattern-label">SK:</span> <code>${highlightPatternVars(skPatternDisplay)}</code></div>`;
+            }
+            html += `</div>`;
+        }
         
         // Collect PK variables using backend-parsed info
         const pkVars = getVariablesFromParsed(pkParsed);
@@ -441,10 +519,10 @@
         // If patterns are static, show simple message
         if (pkVars.length === 0 && skVars.length === 0) {
             if (isStaticPattern(pkParsed)) {
-                html += `<p class="info-text">PK is static: <code>${entity.partitionKeyPattern}</code></p>`;
+                html += `<p class="info-text">PK is static: <code>${pkPatternDisplay}</code></p>`;
             }
             if (isStaticPattern(skParsed)) {
-                html += `<p class="info-text">SK is static: <code>${entity.sortKeyPattern}</code></p>`;
+                html += `<p class="info-text">SK is static: <code>${skPatternDisplay}</code></p>`;
             }
         } else {
             // Partition Key variables section
@@ -489,8 +567,8 @@
                     <div class="form-group">
                         <label for="query-sk-mode">Sort Key Query Mode:</label>
                         <select id="query-sk-mode">
-                            <option value="exact">Exact Match</option>
                             <option value="begins_with">Begins With (prefix)</option>
+                            <option value="exact">Exact Match</option>
                             <option value="none">Any (no SK condition)</option>
                         </select>
                     </div>
@@ -502,10 +580,24 @@
         
         container.innerHTML = html;
         
+        // Attach index change listener
+        attachIndexChangeListener(entityType);
+        
         // Re-attach event listener for the button
         const btn = $('#btn-entity-query');
         if (btn) {
             btn.addEventListener('click', runEntityQuery);
+        }
+    }
+    
+    // Attach change listener to entity query index selector
+    function attachIndexChangeListener(entityType) {
+        const indexSelect = $('#entity-query-index');
+        if (indexSelect) {
+            indexSelect.addEventListener('change', (e) => {
+                state.selectedQueryIndex = e.target.value;
+                renderEntityQueryFields(entityType);
+            });
         }
     }
 
@@ -516,6 +608,18 @@
         
         const gsis = schema.table.gsis || [];
         
+        // Get key defs for current selection
+        function getKeyDefs(indexName) {
+            if (indexName) {
+                const gsi = gsis.find(g => g.name === indexName);
+                return gsi ? { pk: gsi.partitionKey, sk: gsi.sortKey } : { pk: schema.table.partitionKey, sk: schema.table.sortKey };
+            }
+            return { pk: schema.table.partitionKey, sk: schema.table.sortKey };
+        }
+        
+        const selectedAnyIndex = $('#any-query-index')?.value || '';
+        const keyDefs = getKeyDefs(selectedAnyIndex);
+        
         let html = '';
         
         // Index selector
@@ -523,19 +627,20 @@
             <label for="any-query-index">Index:</label>
             <select id="any-query-index">
                 <option value="">Primary Index</option>
-                ${gsis.map(g => `<option value="${g.name}">${g.name}</option>`).join('')}
+                ${gsis.map(g => `<option value="${g.name}"${g.name === selectedAnyIndex ? ' selected' : ''}>${g.name}</option>`).join('')}
             </select>
         </div>`;
         
-        // PK input
+        // PK input - show attribute name in label
         html += `<div class="form-group">
-            <label for="any-query-pk">Partition Key Value:</label>
+            <label for="any-query-pk">Partition Key (<code>${keyDefs.pk.name}</code>):</label>
             <input type="text" id="any-query-pk" placeholder="e.g., USER#123">
         </div>`;
         
-        // SK condition
+        // SK condition - show attribute name in label
+        const skLabel = keyDefs.sk ? `Sort Key (<code>${keyDefs.sk.name}</code>)` : 'Sort Key';
         html += `<div class="form-group">
-            <label for="any-query-sk-op">Sort Key Condition:</label>
+            <label for="any-query-sk-op">${skLabel} Condition:</label>
             <div class="inline-group">
                 <select id="any-query-sk-op">
                     <option value="">None</option>
@@ -565,6 +670,14 @@
             });
         }
         
+        // Index change - re-render to update labels
+        const indexSelect = $('#any-query-index');
+        if (indexSelect) {
+            indexSelect.addEventListener('change', () => {
+                renderAnyQueryFields(container);
+            });
+        }
+        
         // Re-attach event listener for the button
         const btn = $('#btn-entity-query');
         if (btn) {
@@ -589,9 +702,40 @@
         const entity = state.currentSchema?.entities?.find(e => e.type === entityType);
         if (!entity) return;
         
-        // Use backend-parsed patterns
-        const pkParsed = entity.partitionKeyParsed;
-        const skParsed = entity.sortKeyParsed;
+        // Determine which index and patterns to use
+        const selectedIndex = state.selectedQueryIndex || '';
+        let pkParsed, skParsed, pkName, pkKind, skName, skKind;
+        
+        if (selectedIndex) {
+            // Use GSI mapping patterns
+            const gsiMapping = (entity.enrichedGSIMappings || []).find(m => m.gsi === selectedIndex);
+            if (!gsiMapping) {
+                alert('No GSI mapping found for ' + selectedIndex);
+                return;
+            }
+            pkParsed = gsiMapping.partitionParsed;
+            skParsed = gsiMapping.sortParsed;
+            
+            // Look up the GSI key attribute names from the table schema
+            const gsi = state.currentSchema.table.gsis.find(g => g.name === selectedIndex);
+            if (!gsi) {
+                alert('GSI not found: ' + selectedIndex);
+                return;
+            }
+            pkName = gsi.partitionKey.name;
+            pkKind = gsi.partitionKey.kind;
+            skName = gsi.sortKey?.name;
+            skKind = gsi.sortKey?.kind;
+        } else {
+            // Use primary index patterns
+            pkParsed = entity.partitionKeyParsed;
+            skParsed = entity.sortKeyParsed;
+            const schema = state.currentSchema;
+            pkName = schema.table.partitionKey.name;
+            pkKind = schema.table.partitionKey.kind;
+            skName = schema.table.sortKey?.name;
+            skKind = schema.table.sortKey?.kind;
+        }
         
         // Gather variable values
         const varValues = {};
@@ -606,22 +750,18 @@
             return;
         }
         
-        // Build query
-        const schema = state.currentSchema;
-        const pkName = schema.table.partitionKey.name;
-        const pkKind = schema.table.partitionKey.kind;
-        const skName = schema.table.sortKey?.name;
-        const skKind = schema.table.sortKey?.kind;
-        
         let expr = '#pk = :pk';
         const names = { '#pk': pkName };
         // Convert pk value based on key type
         const values = { ':pk': convertKeyValue(pkVal, pkKind) };
         
         // Handle sort key based on mode
-        const skMode = $('#query-sk-mode')?.value || 'none';
+        const skMode = $('#query-sk-mode')?.value || 'begins_with';
         if (skParsed && skName && skMode !== 'none') {
-            const skVal = buildFromParsedPattern(skParsed, varValues);
+            // Use prefix builder for begins_with to avoid trailing separator bug
+            const skVal = skMode === 'begins_with' 
+                ? buildPrefixFromParsedPattern(skParsed, varValues)
+                : buildFromParsedPattern(skParsed, varValues);
             names['#sk'] = skName;
             // Convert sk value based on key type
             values[':sk'] = convertKeyValue(skVal, skKind);
@@ -643,7 +783,10 @@
         console.log('Query body:', JSON.stringify(body, null, 2));
         
         try {
-            const data = await api.post(`/tables/${state.currentTable}/query`, body);
+            const path = selectedIndex
+                ? `/tables/${state.currentTable}/gsi/${selectedIndex}/query`
+                : `/tables/${state.currentTable}/query`;
+            const data = await api.post(path, body);
             renderQueryResults(data.items);
         } catch (err) {
             console.error('Query failed:', err);
@@ -1455,6 +1598,7 @@
         document.addEventListener('change', (e) => {
             if (e.target.id === 'query-entity') {
                 const entityType = e.target.value;
+                state.selectedQueryIndex = '';  // reset index when entity changes
                 renderEntityQueryFields(entityType);
                 
                 // Update sidebar highlighting

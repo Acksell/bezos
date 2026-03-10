@@ -11,6 +11,7 @@
     --danger: #ef4444;
     --border: #333333;
     --input-bg: #1f1f1f;
+    --pattern-var: #60a5fa;
 }
 
 * {
@@ -431,6 +432,10 @@ textarea {
 .schema-value {
     font-family: 'Menlo', 'Monaco', monospace;
     color: var(--success);
+}
+
+.pattern-var {
+    color: var(--pattern-var);
 }
 
 .entity-fields {
