@@ -2,15 +2,20 @@ package ddbstore
 
 import (
 	"fmt"
+	"sync"
 
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/acksell/bezos/dynamodb/table"
 	"github.com/dgraph-io/badger/v4"
 )
+
+var _ ddbiface.Client = (*Store)(nil)
 
 // Store is a DynamoDB-compatible store backed by BadgerDB.
 // It provides full ACID guarantees and supports all major DynamoDB operations.
 type Store struct {
 	db     *badger.DB
+	mu     sync.RWMutex
 	tables map[string]*tableSchema
 }
 
@@ -76,7 +81,9 @@ func (s *Store) getTable(tableName *string) (*tableSchema, error) {
 	if tableName == nil {
 		return nil, fmt.Errorf("table name is required")
 	}
+	s.mu.RLock()
 	schema, ok := s.tables[*tableName]
+	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("table not found: %s", *tableName)
 	}
