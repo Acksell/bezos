@@ -14,8 +14,40 @@
         loading: false,
         selectedIndices: new Set(),
         selectedQueryIndices: new Set(),
-        selectedQueryIndex: ''  // currently selected index for entity query ('' = primary)
+        selectedQueryIndex: '',  // currently selected index for entity query ('' = primary)
+        scanEntityFilter: new Set(),  // entity types to show (empty = all, client-side)
+        scanFilterRows: [],      // server-side filter rows [{attribute, condition, type, value, value2}]
+        scanProjection: '',      // projection expression for scan (comma-separated attribute names)
+        queryFilterRows: [],     // server-side filter rows for query tab
+        queryProjection: '',     // projection expression for query tab
+        queryLastKey: null,      // pagination key for query results
     };
+
+    // Per-table filter state cache: tableName -> { scanEntityFilter (Set), scanFilterRows, scanProjection }
+    const tableFilterCache = {};
+
+    function saveTableFilters() {
+        if (!state.currentTable) return;
+        syncFilterRowState();
+        tableFilterCache[state.currentTable] = {
+            scanEntityFilter: new Set(state.scanEntityFilter),
+            scanFilterRows: state.scanFilterRows.map(r => ({ ...r })),
+            scanProjection: state.scanProjection,
+        };
+    }
+
+    function restoreTableFilters(tableName) {
+        const cached = tableFilterCache[tableName];
+        if (cached) {
+            state.scanEntityFilter = new Set(cached.scanEntityFilter);
+            state.scanFilterRows = cached.scanFilterRows.map(r => ({ ...r }));
+            state.scanProjection = cached.scanProjection;
+        } else {
+            state.scanEntityFilter = new Set();
+            state.scanFilterRows = [];
+            state.scanProjection = '';
+        }
+    }
 
     // Pattern utilities - uses parsed patterns from backend
     // The backend provides patterns as arrays of parts: {isLiteral, value, formats, printfSpec, fieldType}
@@ -282,14 +314,21 @@
         // Load table schema
         try {
             const needsLoad = state.currentTable !== tableName;
-            state.currentTable = tableName;
-            
+
             if (needsLoad) {
+                // Save current table's filter state before switching
+                saveTableFilters();
+                state.currentTable = tableName;
                 state.currentSchema = await api.get(`/tables/${tableName}`);
                 state.items = [];
                 state.lastKey = null;
                 state.selectedIndices.clear();
                 state.selectedQueryIndex = '';
+                state.queryFilterRows = [];
+                state.queryProjection = '';
+                state.queryLastKey = null;
+                // Restore filter state for the new table
+                restoreTableFilters(tableName);
             }
 
             // Update UI
@@ -302,6 +341,25 @@
             
             // Populate entity dropdown for queries
             populateEntityDropdown();
+            
+            // Render filter rows and count (restored from cache or empty)
+            renderFilterRows();
+            updateFilterCount();
+            
+            // Restore projection input from cached state
+            const projInput = $('#scan-projection');
+            if (projInput) projInput.value = state.scanProjection || '';
+            
+            // Restore filter body visibility based on whether there are filter rows
+            const filtersBody = $('#scan-filters-body');
+            const arrow = $('#scan-filters-toggle .toggle-arrow');
+            if (state.scanFilterRows.length > 0) {
+                filtersBody.style.display = 'block';
+                arrow.textContent = '\u25BC';
+            } else {
+                filtersBody.style.display = 'none';
+                arrow.textContent = '\u25B6';
+            }
             
             // Render entities in sidebar
             await renderTableEntities(tableName);
@@ -425,6 +483,9 @@
         // Render the "any" query fields by default
         renderEntityQueryFields('__any__');
     }
+
+    // Populate entity filter dropdown in scan toolbar
+    // Entity filter is now embedded in the table header (popover in renderData)
 
     // Render entity query form fields based on selected entity
     function renderEntityQueryFields(entityType) {
@@ -576,18 +637,10 @@
             `;
         }
         
-        html += `<button id="btn-entity-query" class="btn btn-primary">Run Query</button>`;
-        
         container.innerHTML = html;
         
         // Attach index change listener
         attachIndexChangeListener(entityType);
-        
-        // Re-attach event listener for the button
-        const btn = $('#btn-entity-query');
-        if (btn) {
-            btn.addEventListener('click', runEntityQuery);
-        }
     }
     
     // Attach change listener to entity query index selector
@@ -657,8 +710,6 @@
             </div>
         </div>`;
         
-        html += `<button id="btn-entity-query" class="btn btn-primary">Run Query</button>`;
-        
         container.innerHTML = html;
         
         // SK operator change - show/hide second value input
@@ -677,16 +728,10 @@
                 renderAnyQueryFields(container);
             });
         }
-        
-        // Re-attach event listener for the button
-        const btn = $('#btn-entity-query');
-        if (btn) {
-            btn.addEventListener('click', runEntityQuery);
-        }
     }
 
     // Run query based on entity form
-    async function runEntityQuery() {
+    async function runEntityQuery(append = false) {
         const entityType = $('#query-entity')?.value;
         if (!entityType) {
             alert('Please select an entity');
@@ -695,7 +740,7 @@
         
         // "Any" mode - run raw query
         if (entityType === '__any__') {
-            await runAnyQuery();
+            await runAnyQuery(append);
             return;
         }
         
@@ -773,24 +818,58 @@
             }
         }
         
+        // Sync projection state
+        const projInput = $('#query-projection');
+        if (projInput) state.queryProjection = projInput.value;
+
+        const limit = parseInt($('#query-limit').value);
+        const filter = buildQueryFilter();
+        const projection = buildQueryProjection();
+
         const body = {
             keyConditionExpression: expr,
             expressionAttributeNames: names,
             expressionAttributeValues: values,
-            limit: 50
+            limit: limit
         };
+
+        // Add filter expression
+        if (filter) {
+            body.filterExpression = filter.filterExpression;
+            Object.assign(body.expressionAttributeNames, filter.expressionAttributeNames);
+            if (filter.expressionAttributeValues) {
+                Object.assign(body.expressionAttributeValues, filter.expressionAttributeValues);
+            }
+        }
+
+        // Add projection expression
+        if (projection) {
+            body.projectionExpression = projection.projectionExpression;
+            Object.assign(body.expressionAttributeNames, projection.expressionAttributeNames);
+        }
+
+        if (append && state.queryLastKey) {
+            body.lastKey = state.queryLastKey;
+        }
         
         console.log('Query body:', JSON.stringify(body, null, 2));
         
+        setQueryLoading(true);
         try {
             const path = selectedIndex
                 ? `/tables/${state.currentTable}/gsi/${selectedIndex}/query`
                 : `/tables/${state.currentTable}/query`;
             const data = await api.post(path, body);
-            renderQueryResults(data.items);
+            if (append) {
+                renderQueryResults([...state.queryItems, ...data.items], data.lastKey);
+            } else {
+                renderQueryResults(data.items, data.lastKey);
+            }
         } catch (err) {
             console.error('Query failed:', err);
             alert('Query failed: ' + err.message);
+        } finally {
+            setQueryLoading(false);
         }
     }
     
@@ -812,7 +891,7 @@
     }
 
     // Run query in "Any" mode - raw PK/SK expression (like advanced query)
-    async function runAnyQuery() {
+    async function runAnyQuery(append = false) {
         const indexName = $('#any-query-index')?.value || '';
         const pk = $('#any-query-pk')?.value;
         const skOp = $('#any-query-sk-op')?.value;
@@ -869,39 +948,130 @@
             }
         }
         
+        // Sync projection state
+        const projInput = $('#query-projection');
+        if (projInput) state.queryProjection = projInput.value;
+
+        const limit = parseInt($('#query-limit').value);
+        const filter = buildQueryFilter();
+        const projection = buildQueryProjection();
+
         const body = {
             keyConditionExpression: expr,
             expressionAttributeNames: names,
             expressionAttributeValues: values,
-            limit: 50
+            limit: limit
         };
+
+        // Add filter expression
+        if (filter) {
+            body.filterExpression = filter.filterExpression;
+            Object.assign(body.expressionAttributeNames, filter.expressionAttributeNames);
+            if (filter.expressionAttributeValues) {
+                Object.assign(body.expressionAttributeValues, filter.expressionAttributeValues);
+            }
+        }
+
+        // Add projection expression
+        if (projection) {
+            body.projectionExpression = projection.projectionExpression;
+            Object.assign(body.expressionAttributeNames, projection.expressionAttributeNames);
+        }
+
+        if (append && state.queryLastKey) {
+            body.lastKey = state.queryLastKey;
+        }
         
+        setQueryLoading(true);
         try {
             const path = indexName
                 ? `/tables/${state.currentTable}/gsi/${indexName}/query`
                 : `/tables/${state.currentTable}/query`;
             const data = await api.post(path, body);
-            renderQueryResults(data.items);
+            if (append) {
+                renderQueryResults([...state.queryItems, ...data.items], data.lastKey);
+            } else {
+                renderQueryResults(data.items, data.lastKey);
+            }
         } catch (err) {
             console.error('Query failed:', err);
             alert('Query failed: ' + err.message);
+        } finally {
+            setQueryLoading(false);
         }
+    }
+
+    // Show/hide scan spinner
+    function setScanLoading(loading) {
+        const play = $('.scan-play');
+        const spinner = $('.scan-spinner');
+        const btn = $('#btn-run-scan');
+        if (play) play.style.display = loading ? 'none' : '';
+        if (spinner) spinner.style.display = loading ? '' : 'none';
+        if (btn) btn.disabled = loading;
+    }
+
+    // Show/hide query spinner
+    function setQueryLoading(loading) {
+        const play = $('.query-play');
+        const spinner = $('.query-spinner');
+        const btn = $('#btn-run-query');
+        if (play) play.style.display = loading ? 'none' : '';
+        if (spinner) spinner.style.display = loading ? '' : 'none';
+        if (btn) btn.disabled = loading;
     }
 
     // Load data (scan)
     async function loadData(append = false) {
         if (state.loading) return;
         
+        // Sync projection state from input
+        const projInput = $('#scan-projection');
+        if (projInput) state.scanProjection = projInput.value;
+
         const limit = parseInt($('#page-limit').value);
-        const params = new URLSearchParams({ limit });
-        
-        if (append && state.lastKey) {
-            params.set('lastKey', state.lastKey);
-        }
+        const filter = buildScanFilter();
+        const projection = buildScanProjection();
 
         state.loading = true;
+        setScanLoading(true);
         try {
-            const data = await api.get(`/tables/${state.currentTable}/items?${params}`);
+            let data;
+
+            if (filter || projection) {
+                // Use POST scan endpoint when filter or projection is active
+                const body = { limit };
+
+                if (filter) {
+                    body.filterExpression = filter.filterExpression;
+                    body.expressionAttributeValues = filter.expressionAttributeValues;
+                }
+
+                if (projection) {
+                    body.projectionExpression = projection.projectionExpression;
+                }
+
+                // Merge expressionAttributeNames from filter and projection
+                const mergedNames = {
+                    ...(filter?.expressionAttributeNames || {}),
+                    ...(projection?.expressionAttributeNames || {}),
+                };
+                if (Object.keys(mergedNames).length > 0) {
+                    body.expressionAttributeNames = mergedNames;
+                }
+
+                if (append && state.lastKey) {
+                    body.lastKey = state.lastKey;
+                }
+                data = await api.post(`/tables/${state.currentTable}/scan`, body);
+            } else {
+                // Use GET scan endpoint (no filter, no projection)
+                const params = new URLSearchParams({ limit });
+                if (append && state.lastKey) {
+                    params.set('lastKey', state.lastKey);
+                }
+                data = await api.get(`/tables/${state.currentTable}/items?${params}`);
+            }
             
             if (append) {
                 state.items = [...state.items, ...data.items];
@@ -916,6 +1086,7 @@
             alert('Failed to load data: ' + err.message);
         } finally {
             state.loading = false;
+            setScanLoading(false);
         }
     }
 
@@ -926,14 +1097,22 @@
         const skName = schema.table.sortKey?.name;
 
         // Pre-compute entity types for all items
-        const itemsWithEntity = state.items.map(item => ({
+        const allItemsWithEntity = state.items.map((item, originalIdx) => ({
             item,
-            entityType: detectEntityType(item, schema)
+            entityType: detectEntityType(item, schema),
+            originalIdx
         }));
 
-        // Get all unique keys from items
+        // Apply client-side entity filter
+        const entityFilter = state.scanEntityFilter;
+        const hasEntityFilter = entityFilter.size > 0;
+        const itemsWithEntity = hasEntityFilter
+            ? allItemsWithEntity.filter(e => entityFilter.has(e.entityType))
+            : allItemsWithEntity;
+
+        // Get all unique keys from displayed items
         const allKeys = new Set();
-        state.items.forEach(item => {
+        itemsWithEntity.forEach(({ item }) => {
             Object.keys(item).forEach(k => allKeys.add(k));
         });
 
@@ -949,35 +1128,56 @@
         // Add Entity as first column, checkbox as zeroth
         const columns = ['_select', '_entity', ...sortedKeys];
         
-        // Check if all items are selected
-        const allSelected = state.items.length > 0 && state.selectedIndices.size === state.items.length;
+        // Check if all displayed items are selected
+        const allSelected = itemsWithEntity.length > 0 && itemsWithEntity.every(e => state.selectedIndices.has(e.originalIdx));
+
+        // Collect distinct entity types from loaded items for the filter popover
+        const distinctEntityTypes = [...new Set(allItemsWithEntity.map(e => e.entityType).filter(Boolean))].sort();
 
         // Render header
+        const filterActive = hasEntityFilter ? ' active' : '';
         $('#data-thead').innerHTML = `
             <tr>
                 <th class="checkbox-cell">
                     <input type="checkbox" id="select-all" ${allSelected ? 'checked' : ''} title="Select all">
                 </th>
-                ${['_entity', ...sortedKeys].map(k => `<th>${k === '_entity' ? 'Entity' : k}</th>`).join('')}
+                <th class="th-entity">
+                    <span>Entity</span>
+                    <button class="th-filter-btn${filterActive}" id="entity-filter-btn" title="Filter by entity type">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v1.5a1 1 0 0 1-.293.707L10 8.914V13a1 1 0 0 1-.553.894l-2 1A1 1 0 0 1 6 14v-5.086L1.293 4.207A1 1 0 0 1 1 3.5V2z"/></svg>
+                    </button>
+                    <div class="th-filter-popover" id="entity-filter-popover" style="display:none">
+                        <label class="th-filter-option">
+                            <input type="checkbox" id="entity-filter-all" ${!hasEntityFilter ? 'checked' : ''}> <span>All</span>
+                        </label>
+                        <div class="th-filter-divider"></div>
+                        ${distinctEntityTypes.map(et => `
+                            <label class="th-filter-option">
+                                <input type="checkbox" class="entity-filter-cb" value="${escapeHtml(et)}" ${(!hasEntityFilter || entityFilter.has(et)) ? 'checked' : ''}> <span class="entity-badge" data-entity="${escapeHtml(et)}" style="margin:0">${escapeHtml(et)}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </th>
+                ${sortedKeys.map(k => `<th>${k}</th>`).join('')}
             </tr>
         `;
 
         // Render rows
-        if (state.items.length === 0) {
+        if (itemsWithEntity.length === 0) {
             $('#data-tbody').innerHTML = `
                 <tr>
                     <td colspan="${columns.length}" class="empty-state">
-                        No items found
+                        ${hasEntityFilter ? 'No items match the entity filter' : 'No items found'}
                     </td>
                 </tr>
             `;
         } else {
-            $('#data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType }, idx) => {
-                const isSelected = state.selectedIndices.has(idx);
+            $('#data-tbody').innerHTML = itemsWithEntity.map(({ item, entityType, originalIdx }) => {
+                const isSelected = state.selectedIndices.has(originalIdx);
                 return `
-                <tr data-index="${idx}" class="${isSelected ? 'selected' : ''}">
+                <tr data-index="${originalIdx}" class="${isSelected ? 'selected' : ''}">
                     <td class="checkbox-cell" onclick="event.stopPropagation()">
-                        <input type="checkbox" class="row-select" data-index="${idx}" ${isSelected ? 'checked' : ''}>
+                        <input type="checkbox" class="row-select" data-index="${originalIdx}" ${isSelected ? 'checked' : ''}>
                     </td>
                     <td><span class="entity-badge" data-entity="${entityType || 'unknown'}">${entityType || '?'}</span></td>
                     ${sortedKeys.map(k => {
@@ -991,7 +1191,10 @@
         }
 
         // Update count and load more button
-        $('#item-count').textContent = `${state.items.length} items`;
+        const countText = hasEntityFilter
+            ? `${itemsWithEntity.length} of ${state.items.length} items (filtered)`
+            : `${state.items.length} items`;
+        $('#item-count').textContent = countText;
         $('#btn-load-more').style.display = state.lastKey ? 'inline-block' : 'none';
         
         // Update selection UI
@@ -1011,6 +1214,19 @@
         }
     }
     
+    // Get the indices of currently visible (filtered) items
+    function getVisibleIndices() {
+        const entityFilter = state.scanEntityFilter;
+        if (entityFilter.size === 0) {
+            return state.items.map((_, idx) => idx);
+        }
+        const schema = state.currentSchema;
+        return state.items
+            .map((item, idx) => ({ idx, entityType: detectEntityType(item, schema) }))
+            .filter(e => entityFilter.has(e.entityType))
+            .map(e => e.idx);
+    }
+
     // Toggle selection of a single row
     function toggleRowSelection(idx, selected) {
         if (selected) {
@@ -1028,7 +1244,8 @@
         // Update select-all checkbox state
         const selectAll = $('#select-all');
         if (selectAll) {
-            const allSelected = state.items.length > 0 && state.selectedIndices.size === state.items.length;
+            const visibleIndices = getVisibleIndices();
+            const allSelected = visibleIndices.length > 0 && visibleIndices.every(i => state.selectedIndices.has(i));
             selectAll.checked = allSelected;
             selectAll.indeterminate = state.selectedIndices.size > 0 && !allSelected;
         }
@@ -1036,11 +1253,11 @@
         updateSelectionUI();
     }
     
-    // Select/deselect all
+    // Select/deselect all (only visible/filtered items)
     function toggleSelectAll(selected) {
         state.selectedIndices.clear();
         if (selected) {
-            state.items.forEach((_, idx) => state.selectedIndices.add(idx));
+            getVisibleIndices().forEach(idx => state.selectedIndices.add(idx));
         }
         renderData();
     }
@@ -1264,8 +1481,9 @@
     }
 
     // Render query results using table view (similar to scan)
-    function renderQueryResults(items) {
+    function renderQueryResults(items, lastKey) {
         state.queryItems = items;
+        state.queryLastKey = lastKey || null;
         state.selectedQueryIndices.clear();
         
         const schema = state.currentSchema;
@@ -1334,8 +1552,9 @@
             `}).join('');
         }
 
-        // Update count
-        $('#query-item-count').textContent = `(${items.length} item${items.length !== 1 ? 's' : ''})`;
+        // Update count and load more button
+        $('#query-item-count').textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+        $('#btn-query-load-more').style.display = state.queryLastKey ? 'inline-block' : 'none';
         
         // Update selection UI
         updateQuerySelectionUI();
@@ -1385,13 +1604,13 @@
         if (selected) {
             state.queryItems.forEach((_, idx) => state.selectedQueryIndices.add(idx));
         }
-        renderQueryResults(state.queryItems);
+        renderQueryResults(state.queryItems, state.queryLastKey);
     }
     
     // Clear query selection
     function clearQuerySelection() {
         state.selectedQueryIndices.clear();
-        renderQueryResults(state.queryItems);
+        renderQueryResults(state.queryItems, state.queryLastKey);
     }
     
     // Bulk delete selected query items
@@ -1423,11 +1642,431 @@
             // Remove deleted items from queryItems and re-render
             const remainingItems = state.queryItems.filter((_, idx) => !state.selectedQueryIndices.has(idx));
             state.selectedQueryIndices.clear();
-            renderQueryResults(remainingItems);
+            renderQueryResults(remainingItems, state.queryLastKey);
         } catch (err) {
             alert('Bulk delete failed: ' + err.message);
         }
     }
+
+    // --- Scan Filter Builder ---
+
+    const FILTER_CONDITIONS = [
+        { value: '=',                    label: 'Equal to' },
+        { value: '<>',                   label: 'Not equal to' },
+        { value: '<',                    label: 'Less than' },
+        { value: '<=',                   label: 'Less than or equal to' },
+        { value: '>',                    label: 'Greater than' },
+        { value: '>=',                   label: 'Greater than or equal to' },
+        { value: 'between',             label: 'Between' },
+        { value: 'begins_with',         label: 'Begins with' },
+        { value: 'contains',            label: 'Contains' },
+        { value: 'attribute_exists',    label: 'Attribute exists' },
+        { value: 'attribute_not_exists', label: 'Attribute not exists' },
+    ];
+
+    const FILTER_TYPES = [
+        { value: 'S', label: 'String' },
+        { value: 'N', label: 'Number' },
+        { value: 'BOOL', label: 'Boolean' },
+    ];
+
+    function conditionNeedsValue(condition) {
+        return condition !== 'attribute_exists' && condition !== 'attribute_not_exists';
+    }
+
+    function conditionNeedsSecondValue(condition) {
+        return condition === 'between';
+    }
+
+    function addFilterRow() {
+        state.scanFilterRows.push({
+            attribute: '',
+            condition: '=',
+            type: 'S',
+            value: '',
+            value2: '',
+        });
+        renderFilterRows();
+    }
+
+    function removeFilterRow(idx) {
+        state.scanFilterRows.splice(idx, 1);
+        renderFilterRows();
+        updateFilterCount();
+    }
+
+    function renderFilterRows() {
+        const container = $('#scan-filter-rows');
+        if (!container) return;
+
+        if (state.scanFilterRows.length === 0) {
+            container.innerHTML = '<div class="scan-filter-empty">No filters. Click "Add filter" to add one.</div>';
+            return;
+        }
+
+        container.innerHTML = state.scanFilterRows.map((row, idx) => {
+            const needsValue = conditionNeedsValue(row.condition);
+            const needsValue2 = conditionNeedsSecondValue(row.condition);
+            return `
+            <div class="scan-filter-row" data-filter-idx="${idx}">
+                <div class="scan-filter-field">
+                    <label>Attribute name</label>
+                    <input type="text" class="filter-attr" data-idx="${idx}" value="${escapeHtml(row.attribute)}" placeholder="e.g. status">
+                </div>
+                <div class="scan-filter-field">
+                    <label>Condition</label>
+                    <select class="filter-condition" data-idx="${idx}">
+                        ${FILTER_CONDITIONS.map(c => `<option value="${c.value}"${c.value === row.condition ? ' selected' : ''}>${c.label}</option>`).join('')}
+                    </select>
+                </div>
+                ${needsValue ? `
+                <div class="scan-filter-field">
+                    <label>Type</label>
+                    <select class="filter-type" data-idx="${idx}">
+                        ${FILTER_TYPES.map(t => `<option value="${t.value}"${t.value === row.type ? ' selected' : ''}>${t.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="scan-filter-field scan-filter-value-field">
+                    <label>Value</label>
+                    <input type="text" class="filter-value" data-idx="${idx}" value="${escapeHtml(row.value)}" placeholder="Enter value">
+                </div>
+                ` : ''}
+                ${needsValue2 ? `
+                <div class="scan-filter-field scan-filter-value-field">
+                    <label>Value 2</label>
+                    <input type="text" class="filter-value2" data-idx="${idx}" value="${escapeHtml(row.value2)}" placeholder="End value">
+                </div>
+                ` : ''}
+                <div class="scan-filter-field scan-filter-remove">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-danger btn-sm filter-remove-btn" data-idx="${idx}">Remove</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function updateFilterCount() {
+        const countEl = $('#scan-filter-count');
+        if (!countEl) return;
+        const n = state.scanFilterRows.length;
+        countEl.textContent = n > 0 ? `(${n})` : '';
+    }
+
+    function syncFilterRowState() {
+        // Read current values from DOM inputs back into state
+        state.scanFilterRows.forEach((row, idx) => {
+            const attr = $(`.filter-attr[data-idx="${idx}"]`);
+            const cond = $(`.filter-condition[data-idx="${idx}"]`);
+            const type = $(`.filter-type[data-idx="${idx}"]`);
+            const val = $(`.filter-value[data-idx="${idx}"]`);
+            const val2 = $(`.filter-value2[data-idx="${idx}"]`);
+            if (attr) row.attribute = attr.value;
+            if (cond) row.condition = cond.value;
+            if (type) row.type = type.value;
+            if (val) row.value = val.value;
+            if (val2) row.value2 = val2.value;
+        });
+    }
+
+    // Convert a typed value to JSON-compatible value for the API
+    function convertFilterValue(rawValue, type) {
+        switch (type) {
+            case 'N':
+                return parseFloat(rawValue);
+            case 'BOOL':
+                return rawValue.toLowerCase() === 'true';
+            default:
+                return rawValue;
+        }
+    }
+
+    // Build filterExpression, expressionAttributeNames, expressionAttributeValues from filter rows
+    function buildScanFilter() {
+        syncFilterRowState();
+        const rows = state.scanFilterRows.filter(r => r.attribute.trim() !== '');
+        if (rows.length === 0) return null;
+
+        const expressions = [];
+        const names = {};
+        const values = {};
+
+        rows.forEach((row, idx) => {
+            const nameKey = `#fattr${idx}`;
+            const valKey = `:fval${idx}`;
+            const valKey2 = `:fval${idx}b`;
+            names[nameKey] = row.attribute.trim();
+
+            const needsVal = conditionNeedsValue(row.condition);
+            if (needsVal) {
+                values[valKey] = convertFilterValue(row.value, row.type);
+            }
+
+            switch (row.condition) {
+                case '=':
+                case '<>':
+                case '<':
+                case '<=':
+                case '>':
+                case '>=':
+                    expressions.push(`${nameKey} ${row.condition} ${valKey}`);
+                    break;
+                case 'between':
+                    values[valKey2] = convertFilterValue(row.value2, row.type);
+                    expressions.push(`${nameKey} BETWEEN ${valKey} AND ${valKey2}`);
+                    break;
+                case 'begins_with':
+                    expressions.push(`begins_with(${nameKey}, ${valKey})`);
+                    break;
+                case 'contains':
+                    expressions.push(`contains(${nameKey}, ${valKey})`);
+                    break;
+                case 'attribute_exists':
+                    expressions.push(`attribute_exists(${nameKey})`);
+                    break;
+                case 'attribute_not_exists':
+                    expressions.push(`attribute_not_exists(${nameKey})`);
+                    break;
+            }
+        });
+
+        if (expressions.length === 0) return null;
+
+        return {
+            filterExpression: expressions.join(' AND '),
+            expressionAttributeNames: names,
+            expressionAttributeValues: Object.keys(values).length > 0 ? values : undefined,
+        };
+    }
+
+    // Build projectionExpression and its expressionAttributeNames from the projection input
+    function buildScanProjection() {
+        const input = $('#scan-projection');
+        const raw = (input ? input.value : state.scanProjection).trim();
+        if (!raw) return null;
+
+        // Split on commas, trim each attribute path
+        const attrs = raw.split(',').map(a => a.trim()).filter(a => a);
+        if (attrs.length === 0) return null;
+
+        const names = {};
+        const projParts = [];
+
+        attrs.forEach((attr, idx) => {
+            // Handle nested paths like "info.rating" -> "#pattr0.#pattr1"
+            const segments = attr.split('.');
+            const aliased = segments.map((seg, segIdx) => {
+                const nameKey = `#pattr${idx}_${segIdx}`;
+                names[nameKey] = seg;
+                return nameKey;
+            });
+            projParts.push(aliased.join('.'));
+        });
+
+        return {
+            projectionExpression: projParts.join(', '),
+            expressionAttributeNames: names,
+        };
+    }
+
+    function resetFilters() {
+        state.scanFilterRows = [];
+        state.scanProjection = '';
+        state.scanEntityFilter = new Set();
+        const projInput = $('#scan-projection');
+        if (projInput) projInput.value = '';
+        renderFilterRows();
+        updateFilterCount();
+        state.selectedIndices.clear();
+        loadData();
+    }
+
+    // --- End Scan Filter Builder ---
+
+    // --- Query Filter Builder ---
+
+    function addQueryFilterRow() {
+        state.queryFilterRows.push({
+            attribute: '',
+            condition: '=',
+            type: 'S',
+            value: '',
+            value2: '',
+        });
+        renderQueryFilterRows();
+    }
+
+    function removeQueryFilterRow(idx) {
+        state.queryFilterRows.splice(idx, 1);
+        renderQueryFilterRows();
+        updateQueryFilterCount();
+    }
+
+    function renderQueryFilterRows() {
+        const container = $('#query-filter-rows');
+        if (!container) return;
+
+        if (state.queryFilterRows.length === 0) {
+            container.innerHTML = '<div class="scan-filter-empty">No filters. Click "Add filter" to add one.</div>';
+            return;
+        }
+
+        container.innerHTML = state.queryFilterRows.map((row, idx) => {
+            const needsValue = conditionNeedsValue(row.condition);
+            const needsValue2 = conditionNeedsSecondValue(row.condition);
+            return `
+            <div class="scan-filter-row" data-qfilter-idx="${idx}">
+                <div class="scan-filter-field">
+                    <label>Attribute name</label>
+                    <input type="text" class="qfilter-attr" data-idx="${idx}" value="${escapeHtml(row.attribute)}" placeholder="e.g. status">
+                </div>
+                <div class="scan-filter-field">
+                    <label>Condition</label>
+                    <select class="qfilter-condition" data-idx="${idx}">
+                        ${FILTER_CONDITIONS.map(c => `<option value="${c.value}"${c.value === row.condition ? ' selected' : ''}>${c.label}</option>`).join('')}
+                    </select>
+                </div>
+                ${needsValue ? `
+                <div class="scan-filter-field">
+                    <label>Type</label>
+                    <select class="qfilter-type" data-idx="${idx}">
+                        ${FILTER_TYPES.map(t => `<option value="${t.value}"${t.value === row.type ? ' selected' : ''}>${t.label}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="scan-filter-field scan-filter-value-field">
+                    <label>Value</label>
+                    <input type="text" class="qfilter-value" data-idx="${idx}" value="${escapeHtml(row.value)}" placeholder="Enter value">
+                </div>
+                ` : ''}
+                ${needsValue2 ? `
+                <div class="scan-filter-field scan-filter-value-field">
+                    <label>Value 2</label>
+                    <input type="text" class="qfilter-value2" data-idx="${idx}" value="${escapeHtml(row.value2)}" placeholder="End value">
+                </div>
+                ` : ''}
+                <div class="scan-filter-field scan-filter-remove">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-danger btn-sm qfilter-remove-btn" data-idx="${idx}">Remove</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function updateQueryFilterCount() {
+        const countEl = $('#query-filter-count');
+        if (!countEl) return;
+        const n = state.queryFilterRows.length;
+        countEl.textContent = n > 0 ? `(${n})` : '';
+    }
+
+    function syncQueryFilterRowState() {
+        state.queryFilterRows.forEach((row, idx) => {
+            const attr = $(`.qfilter-attr[data-idx="${idx}"]`);
+            const cond = $(`.qfilter-condition[data-idx="${idx}"]`);
+            const type = $(`.qfilter-type[data-idx="${idx}"]`);
+            const val = $(`.qfilter-value[data-idx="${idx}"]`);
+            const val2 = $(`.qfilter-value2[data-idx="${idx}"]`);
+            if (attr) row.attribute = attr.value;
+            if (cond) row.condition = cond.value;
+            if (type) row.type = type.value;
+            if (val) row.value = val.value;
+            if (val2) row.value2 = val2.value;
+        });
+    }
+
+    function buildQueryFilter() {
+        syncQueryFilterRowState();
+        const rows = state.queryFilterRows.filter(r => r.attribute.trim() !== '');
+        if (rows.length === 0) return null;
+
+        const expressions = [];
+        const names = {};
+        const values = {};
+
+        rows.forEach((row, idx) => {
+            const nameKey = `#qfattr${idx}`;
+            const valKey = `:qfval${idx}`;
+            const valKey2 = `:qfval${idx}b`;
+            names[nameKey] = row.attribute.trim();
+
+            const needsVal = conditionNeedsValue(row.condition);
+            if (needsVal) {
+                values[valKey] = convertFilterValue(row.value, row.type);
+            }
+
+            switch (row.condition) {
+                case '=':
+                case '<>':
+                case '<':
+                case '<=':
+                case '>':
+                case '>=':
+                    expressions.push(`${nameKey} ${row.condition} ${valKey}`);
+                    break;
+                case 'between':
+                    values[valKey2] = convertFilterValue(row.value2, row.type);
+                    expressions.push(`${nameKey} BETWEEN ${valKey} AND ${valKey2}`);
+                    break;
+                case 'begins_with':
+                    expressions.push(`begins_with(${nameKey}, ${valKey})`);
+                    break;
+                case 'contains':
+                    expressions.push(`contains(${nameKey}, ${valKey})`);
+                    break;
+                case 'attribute_exists':
+                    expressions.push(`attribute_exists(${nameKey})`);
+                    break;
+                case 'attribute_not_exists':
+                    expressions.push(`attribute_not_exists(${nameKey})`);
+                    break;
+            }
+        });
+
+        if (expressions.length === 0) return null;
+
+        return {
+            filterExpression: expressions.join(' AND '),
+            expressionAttributeNames: names,
+            expressionAttributeValues: Object.keys(values).length > 0 ? values : undefined,
+        };
+    }
+
+    function buildQueryProjection() {
+        const input = $('#query-projection');
+        const raw = (input ? input.value : state.queryProjection).trim();
+        if (!raw) return null;
+
+        const attrs = raw.split(',').map(a => a.trim()).filter(a => a);
+        if (attrs.length === 0) return null;
+
+        const names = {};
+        const projParts = [];
+
+        attrs.forEach((attr, idx) => {
+            const segments = attr.split('.');
+            const aliased = segments.map((seg, segIdx) => {
+                const nameKey = `#qpattr${idx}_${segIdx}`;
+                names[nameKey] = seg;
+                return nameKey;
+            });
+            projParts.push(aliased.join('.'));
+        });
+
+        return {
+            projectionExpression: projParts.join(', '),
+            expressionAttributeNames: names,
+        };
+    }
+
+    function resetQueryFilters() {
+        state.queryFilterRows = [];
+        state.queryProjection = '';
+        const projInput = $('#query-projection');
+        if (projInput) projInput.value = '';
+        renderQueryFilterRows();
+        updateQueryFilterCount();
+    }
+
+    // --- End Query Filter Builder ---
 
     // Setup event listeners
     function setupEventListeners() {
@@ -1490,6 +2129,13 @@
             loadData();
         });
 
+        // Run scan button (play icon in toolbar)
+        $('#btn-run-scan').addEventListener('click', () => {
+            state.selectedIndices.clear();
+            updateFilterCount();
+            loadData();
+        });
+
         // New item button
         $('#btn-new-item').addEventListener('click', () => openItemModal(null, true));
 
@@ -1498,6 +2144,206 @@
             state.selectedIndices.clear();
             loadData();
         });
+
+        // Entity filter popover (delegated - elements are inside dynamic thead)
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('#entity-filter-btn');
+            const popover = document.getElementById('entity-filter-popover');
+            if (btn && popover) {
+                e.stopPropagation();
+                popover.style.display = popover.style.display === 'none' ? 'block' : 'none';
+                return;
+            }
+            // Clicking inside popover
+            if (e.target.closest('#entity-filter-popover')) {
+                return; // handled by change listener below
+            }
+            // Click outside - close any open popover
+            if (popover && popover.style.display !== 'none') {
+                popover.style.display = 'none';
+            }
+        });
+
+        // Entity filter checkbox changes (delegated)
+        document.addEventListener('change', (e) => {
+            const popover = document.getElementById('entity-filter-popover');
+            if (!popover || !popover.contains(e.target)) return;
+
+            if (e.target.id === 'entity-filter-all') {
+                // "All" checkbox toggled
+                if (e.target.checked) {
+                    state.scanEntityFilter = new Set();
+                    // Check all individual checkboxes
+                    popover.querySelectorAll('.entity-filter-cb').forEach(cb => cb.checked = true);
+                } else {
+                    // Uncheck all - show nothing (will show empty state)
+                    const allTypes = [...popover.querySelectorAll('.entity-filter-cb')].map(cb => cb.value);
+                    state.scanEntityFilter = new Set(); // empty = all, but we want none
+                    popover.querySelectorAll('.entity-filter-cb').forEach(cb => cb.checked = false);
+                    // We need a way to distinguish "all" from "none" — unchecking All re-checks it and keeps showing all
+                    e.target.checked = true;
+                    return;
+                }
+            } else if (e.target.classList.contains('entity-filter-cb')) {
+                // Individual entity checkbox toggled
+                const checked = [...popover.querySelectorAll('.entity-filter-cb')]
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.value);
+                const allCbs = popover.querySelectorAll('.entity-filter-cb');
+                const allCheckbox = document.getElementById('entity-filter-all');
+
+                if (checked.length === allCbs.length || checked.length === 0) {
+                    // All checked or none checked → show all
+                    state.scanEntityFilter = new Set();
+                    if (allCheckbox) allCheckbox.checked = true;
+                    allCbs.forEach(cb => cb.checked = true);
+                } else {
+                    state.scanEntityFilter = new Set(checked);
+                    if (allCheckbox) allCheckbox.checked = false;
+                }
+            }
+
+            state.selectedIndices.clear();
+            renderData();
+        });
+
+        // Scan filter toggle (expand/collapse)
+        $('#scan-filters-toggle').addEventListener('click', () => {
+            const body = $('#scan-filters-body');
+            const arrow = $('#scan-filters-toggle .toggle-arrow');
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? 'block' : 'none';
+            arrow.textContent = isHidden ? '\u25BC' : '\u25B6';
+        });
+
+        // Query filter toggle (expand/collapse)
+        $('#query-filters-toggle').addEventListener('click', () => {
+            const body = $('#query-filters-body');
+            const arrow = $('#query-filters-toggle .toggle-arrow');
+            const isHidden = body.style.display === 'none';
+            body.style.display = isHidden ? 'block' : 'none';
+            arrow.textContent = isHidden ? '\u25BC' : '\u25B6';
+        });
+
+        // Add filter row
+        $('#btn-add-filter').addEventListener('click', () => {
+            addFilterRow();
+            updateFilterCount();
+        });
+
+        // Apply filters (run scan with filter)
+        $('#btn-apply-filters').addEventListener('click', () => {
+            state.selectedIndices.clear();
+            updateFilterCount();
+            loadData();
+        });
+
+        // Reset filters
+        $('#btn-reset-filters').addEventListener('click', resetFilters);
+
+        // Filter row changes (delegated)
+        $('#scan-filter-rows').addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx);
+            if (isNaN(idx)) return;
+
+            if (e.target.classList.contains('filter-condition')) {
+                // Condition changed - need to re-render row (may show/hide value inputs)
+                syncFilterRowState();
+                state.scanFilterRows[idx].condition = e.target.value;
+                renderFilterRows();
+            } else if (e.target.classList.contains('filter-attr')) {
+                state.scanFilterRows[idx].attribute = e.target.value;
+            } else if (e.target.classList.contains('filter-type')) {
+                state.scanFilterRows[idx].type = e.target.value;
+            }
+        });
+
+        $('#scan-filter-rows').addEventListener('input', (e) => {
+            const idx = parseInt(e.target.dataset.idx);
+            if (isNaN(idx)) return;
+            if (e.target.classList.contains('filter-value')) {
+                state.scanFilterRows[idx].value = e.target.value;
+            } else if (e.target.classList.contains('filter-value2')) {
+                state.scanFilterRows[idx].value2 = e.target.value;
+            } else if (e.target.classList.contains('filter-attr')) {
+                state.scanFilterRows[idx].attribute = e.target.value;
+            }
+        });
+
+        // Remove filter row (delegated)
+        $('#scan-filter-rows').addEventListener('click', (e) => {
+            if (e.target.classList.contains('filter-remove-btn')) {
+                const idx = parseInt(e.target.dataset.idx);
+                removeFilterRow(idx);
+            }
+        });
+
+        // --- Query filter event listeners ---
+
+        // Run query button (play icon in toolbar)
+        $('#btn-run-query').addEventListener('click', () => {
+            state.selectedQueryIndices.clear();
+            updateQueryFilterCount();
+            runEntityQuery();
+        });
+
+        // Query limit change
+        // (no auto-run on limit change for query - user must click play)
+
+        // Add query filter row
+        $('#btn-query-add-filter').addEventListener('click', () => {
+            addQueryFilterRow();
+            updateQueryFilterCount();
+        });
+
+        // Apply query filters (run query with filter)
+        $('#btn-query-apply-filters').addEventListener('click', () => {
+            state.selectedQueryIndices.clear();
+            updateQueryFilterCount();
+            runEntityQuery();
+        });
+
+        // Reset query filters
+        $('#btn-query-reset-filters').addEventListener('click', resetQueryFilters);
+
+        // Query filter row changes (delegated)
+        $('#query-filter-rows').addEventListener('change', (e) => {
+            const idx = parseInt(e.target.dataset.idx);
+            if (isNaN(idx)) return;
+
+            if (e.target.classList.contains('qfilter-condition')) {
+                syncQueryFilterRowState();
+                state.queryFilterRows[idx].condition = e.target.value;
+                renderQueryFilterRows();
+            } else if (e.target.classList.contains('qfilter-attr')) {
+                state.queryFilterRows[idx].attribute = e.target.value;
+            } else if (e.target.classList.contains('qfilter-type')) {
+                state.queryFilterRows[idx].type = e.target.value;
+            }
+        });
+
+        $('#query-filter-rows').addEventListener('input', (e) => {
+            const idx = parseInt(e.target.dataset.idx);
+            if (isNaN(idx)) return;
+            if (e.target.classList.contains('qfilter-value')) {
+                state.queryFilterRows[idx].value = e.target.value;
+            } else if (e.target.classList.contains('qfilter-value2')) {
+                state.queryFilterRows[idx].value2 = e.target.value;
+            } else if (e.target.classList.contains('qfilter-attr')) {
+                state.queryFilterRows[idx].attribute = e.target.value;
+            }
+        });
+
+        // Remove query filter row (delegated)
+        $('#query-filter-rows').addEventListener('click', (e) => {
+            if (e.target.classList.contains('qfilter-remove-btn')) {
+                const idx = parseInt(e.target.dataset.idx);
+                removeQueryFilterRow(idx);
+            }
+        });
+
+        // Query load more button
+        $('#btn-query-load-more').addEventListener('click', () => runEntityQuery(true));
 
         // Load more button
         $('#btn-load-more').addEventListener('click', () => loadData(true));

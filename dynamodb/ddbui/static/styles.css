@@ -261,6 +261,16 @@ body {
     gap: 0.5rem;
 }
 
+.toolbar-group-grow {
+    flex: 1;
+    min-width: 0;
+}
+
+.toolbar-group-grow input[type="text"] {
+    flex: 1;
+    min-width: 0;
+}
+
 .toolbar-group label {
     font-size: 0.875rem;
     color: var(--text-secondary);
@@ -671,7 +681,81 @@ textarea {
     --entity-hue: 170;
 }
 
-/* Query Section */
+/* Entity column header with filter */
+.th-entity {
+    position: relative;
+}
+
+.th-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.125rem;
+    margin-left: 0.25rem;
+    border-radius: 0.25rem;
+    vertical-align: middle;
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.th-filter-btn:hover {
+    opacity: 1;
+    color: var(--text-primary);
+}
+
+.th-filter-btn.active {
+    opacity: 1;
+    color: var(--accent);
+}
+
+.th-filter-popover {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 100;
+    min-width: 180px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    padding: 0.375rem 0;
+}
+
+.th-filter-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.th-filter-option:hover {
+    background: var(--bg-tertiary);
+}
+
+.th-filter-option input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.th-filter-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 0.25rem 0;
+}
 .query-section {
     margin-bottom: 1.5rem;
 }
@@ -869,4 +953,132 @@ textarea {
 
 .data-table tr.selected:hover td {
     background: rgba(255, 153, 0, 0.2);
+}
+
+/* Scan Filters */
+.scan-filters {
+    background: var(--bg-secondary);
+    border-radius: 0.375rem;
+    border: 1px solid var(--border);
+    margin-bottom: 1rem;
+}
+
+.scan-filters-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.scan-filters-header:hover {
+    color: var(--text-primary);
+}
+
+.toggle-arrow {
+    font-size: 0.7rem;
+    transition: transform 0.15s;
+}
+
+.filter-count {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.scan-filters-body {
+    padding: 0 1rem 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.scan-filter-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.scan-filter-row:last-child {
+    border-bottom: none;
+}
+
+.scan-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.scan-filter-field label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    letter-spacing: 0.03em;
+}
+
+.scan-filter-field input,
+.scan-filter-field select {
+    min-width: 130px;
+}
+
+.scan-filter-value-field input {
+    min-width: 160px;
+}
+
+.scan-filter-remove {
+    margin-left: auto;
+}
+
+.scan-filter-remove .btn {
+    white-space: nowrap;
+}
+
+.scan-filters-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.scan-filter-empty {
+    padding: 0.75rem 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    font-size: 0.75rem;
+    line-height: 1;
+    border-radius: 0.375rem;
+}
+
+.scan-spinner,
+.query-spinner {
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }

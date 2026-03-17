@@ -49,13 +49,43 @@
                 <div id="tab-data" class="tab-content active">
                     <div class="toolbar">
                         <div class="toolbar-group">
+                            <button id="btn-run-scan" class="btn btn-primary btn-icon" title="Run scan">
+                                <span class="scan-play">&#9654;</span>
+                                <span class="scan-spinner" style="display:none"></span>
+                            </button>
+                        </div>
+                        <div class="toolbar-group">
                             <label>Limit:</label>
                             <select id="page-limit">
                                 <option value="10">10</option>
                                 <option value="25" selected>25</option>
                                 <option value="50">50</option>
                                 <option value="100">100</option>
+                                <option value="1000">1,000</option>
+                                <option value="5000">5,000</option>
+                                <option value="10000">10,000</option>
                             </select>
+                        </div>
+                        <div class="toolbar-group toolbar-group-grow">
+                            <label>Attributes:</label>
+                            <input type="text" id="scan-projection" placeholder="e.g. pk, sk, status, info.rating" title="Comma-separated attribute names to return (leave empty for all)">
+                        </div>
+                    </div>
+                    <div class="scan-filters">
+                        <div class="scan-filters-header" id="scan-filters-toggle">
+                            <span class="toggle-arrow">&#9654;</span>
+                            <span>Filters</span>
+                            <span class="filter-count" id="scan-filter-count"></span>
+                        </div>
+                        <div class="scan-filters-body" id="scan-filters-body" style="display: none;">
+                            <div id="scan-filter-rows">
+                                <!-- Filter rows populated by JS -->
+                            </div>
+                            <div class="scan-filters-actions">
+                                <button id="btn-add-filter" class="btn btn-secondary btn-sm">Add filter</button>
+                                <button id="btn-apply-filters" class="btn btn-primary btn-sm">Run</button>
+                                <button id="btn-reset-filters" class="btn btn-secondary btn-sm">Reset</button>
+                            </div>
                         </div>
                     </div>
                     <div id="bulk-actions-bar" class="bulk-actions-bar" style="display: none;">
@@ -111,9 +141,50 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <div class="toolbar">
+                        <div class="toolbar-group">
+                            <button id="btn-run-query" class="btn btn-primary btn-icon" title="Run query">
+                                <span class="query-play">&#9654;</span>
+                                <span class="query-spinner" style="display:none"></span>
+                            </button>
+                        </div>
+                        <div class="toolbar-group">
+                            <label>Limit:</label>
+                            <select id="query-limit">
+                                <option value="10">10</option>
+                                <option value="25" selected>25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="1000">1,000</option>
+                                <option value="5000">5,000</option>
+                                <option value="10000">10,000</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-group toolbar-group-grow">
+                            <label>Attributes:</label>
+                            <input type="text" id="query-projection" placeholder="e.g. pk, sk, status, info.rating" title="Comma-separated attribute names to return (leave empty for all)">
+                        </div>
+                    </div>
+                    <div class="scan-filters">
+                        <div class="scan-filters-header" id="query-filters-toggle">
+                            <span class="toggle-arrow">&#9654;</span>
+                            <span>Filters</span>
+                            <span class="filter-count" id="query-filter-count"></span>
+                        </div>
+                        <div class="scan-filters-body" id="query-filters-body" style="display: none;">
+                            <div id="query-filter-rows">
+                                <!-- Filter rows populated by JS -->
+                            </div>
+                            <div class="scan-filters-actions">
+                                <button id="btn-query-add-filter" class="btn btn-secondary btn-sm">Add filter</button>
+                                <button id="btn-query-apply-filters" class="btn btn-primary btn-sm">Run</button>
+                                <button id="btn-query-reset-filters" class="btn btn-secondary btn-sm">Reset</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="query-results">
-                        <h3>Results <span id="query-item-count"></span></h3>
                         <div id="query-bulk-actions-bar" class="bulk-actions-bar" style="display: none;">
                             <span id="query-selection-count">0 selected</span>
                             <button id="btn-query-export-csv" class="btn btn-primary btn-sm">Export CSV</button>
@@ -130,6 +201,10 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                        <div class="pagination">
+                            <span id="query-item-count"></span>
+                            <button id="btn-query-load-more" class="btn btn-secondary" style="display:none">Load More</button>
                         </div>
                     </div>
                 </div>

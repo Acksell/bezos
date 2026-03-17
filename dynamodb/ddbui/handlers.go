@@ -34,6 +34,7 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tables", h.listTables)
 	mux.HandleFunc("GET /api/tables/{table}", h.getTable)
 	mux.HandleFunc("GET /api/tables/{table}/items", h.scanItems)
+	mux.HandleFunc("POST /api/tables/{table}/scan", h.scanWithFilter)
 	mux.HandleFunc("POST /api/tables/{table}/items", h.putItem)
 	mux.HandleFunc("GET /api/tables/{table}/items/{pk}", h.getItem)
 	mux.HandleFunc("GET /api/tables/{table}/items/{pk}/{sk}", h.getItemWithSK)
@@ -88,7 +89,6 @@ func (h *APIHandler) scanItems(w http.ResponseWriter, r *http.Request) {
 
 	input := &dynamodb.ScanInput{
 		TableName: &tableName,
-		Limit:     int32Ptr(int32(limit)),
 	}
 
 	if lastKeyB64 != "" {
@@ -100,20 +100,97 @@ func (h *APIHandler) scanItems(w http.ResponseWriter, r *http.Request) {
 		input.ExclusiveStartKey = lastKey
 	}
 
-	output, err := h.client.Scan(r.Context(), input)
+	items, lastKey, err := h.paginatedScan(r.Context(), input, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "scan failed: "+err.Error())
 		return
 	}
 
-	items := convertItemsToJSON(output.Items)
+	jsonItems := convertItemsToJSON(items)
 	resp := map[string]any{
-		"items": items,
-		"count": len(items),
+		"items": jsonItems,
+		"count": len(jsonItems),
 	}
 
-	if output.LastEvaluatedKey != nil {
-		resp["lastKey"] = encodeLastKey(output.LastEvaluatedKey)
+	if lastKey != nil {
+		resp["lastKey"] = encodeLastKey(lastKey)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ScanRequest is the JSON request body for scanning with filters.
+type ScanRequest struct {
+	FilterExpression          string            `json:"filterExpression,omitempty"`
+	ProjectionExpression      string            `json:"projectionExpression,omitempty"`
+	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames,omitempty"`
+	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues,omitempty"`
+	Limit                     int               `json:"limit,omitempty"`
+	LastKey                   string            `json:"lastKey,omitempty"`
+}
+
+// scanWithFilter scans a table with an optional filter expression.
+func (h *APIHandler) scanWithFilter(w http.ResponseWriter, r *http.Request) {
+	tableName := r.PathValue("table")
+	if _, ok := h.schema.Tables[tableName]; !ok {
+		writeError(w, http.StatusNotFound, "table not found: "+tableName)
+		return
+	}
+
+	var req ScanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	limit := 25
+	if req.Limit > 0 {
+		limit = req.Limit
+	}
+
+	input := &dynamodb.ScanInput{
+		TableName: &tableName,
+	}
+
+	if req.FilterExpression != "" {
+		input.FilterExpression = &req.FilterExpression
+	}
+
+	if req.ProjectionExpression != "" {
+		input.ProjectionExpression = &req.ProjectionExpression
+	}
+
+	if len(req.ExpressionAttributeNames) > 0 {
+		input.ExpressionAttributeNames = req.ExpressionAttributeNames
+	}
+
+	if len(req.ExpressionAttributeValues) > 0 {
+		input.ExpressionAttributeValues = convertExpressionValues(req.ExpressionAttributeValues)
+	}
+
+	if req.LastKey != "" {
+		lastKey, err := decodeLastKey(req.LastKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid lastKey: "+err.Error())
+			return
+		}
+		input.ExclusiveStartKey = lastKey
+	}
+
+	items, lastKey, err := h.paginatedScan(r.Context(), input, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "scan failed: "+err.Error())
+		return
+	}
+
+	jsonItems := convertItemsToJSON(items)
+	resp := map[string]any{
+		"items": jsonItems,
+		"count": len(jsonItems),
+	}
+
+	if lastKey != nil {
+		resp["lastKey"] = encodeLastKey(lastKey)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -302,6 +379,7 @@ func (h *APIHandler) putItem(w http.ResponseWriter, r *http.Request) {
 type QueryRequest struct {
 	KeyConditionExpression    string            `json:"keyConditionExpression"`
 	FilterExpression          string            `json:"filterExpression,omitempty"`
+	ProjectionExpression      string            `json:"projectionExpression,omitempty"`
 	ExpressionAttributeNames  map[string]string `json:"expressionAttributeNames,omitempty"`
 	ExpressionAttributeValues map[string]any    `json:"expressionAttributeValues,omitempty"`
 	Limit                     int               `json:"limit,omitempty"`
@@ -364,6 +442,10 @@ func (h *APIHandler) doQuery(w http.ResponseWriter, r *http.Request, tableName s
 		input.FilterExpression = &req.FilterExpression
 	}
 
+	if req.ProjectionExpression != "" {
+		input.ProjectionExpression = &req.ProjectionExpression
+	}
+
 	if req.LastKey != "" {
 		lastKey, err := decodeLastKey(req.LastKey)
 		if err != nil {
@@ -390,6 +472,34 @@ func (h *APIHandler) doQuery(w http.ResponseWriter, r *http.Request, tableName s
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// paginatedScan performs multiple Scan calls until the requested number of items
+// is collected or there are no more pages. DynamoDB returns at most 1MB per call,
+// so a single request may not satisfy large limits.
+func (h *APIHandler) paginatedScan(ctx context.Context, input *dynamodb.ScanInput, limit int) ([]map[string]types.AttributeValue, map[string]types.AttributeValue, error) {
+	var allItems []map[string]types.AttributeValue
+
+	for {
+		// Ask for at most the remaining items we need.
+		remaining := int32(limit - len(allItems))
+		input.Limit = &remaining
+
+		output, err := h.client.Scan(ctx, input)
+		if err != nil {
+			return allItems, nil, err
+		}
+
+		allItems = append(allItems, output.Items...)
+
+		// Stop if we have enough items or there are no more pages.
+		if len(allItems) >= limit || output.LastEvaluatedKey == nil {
+			return allItems, output.LastEvaluatedKey, nil
+		}
+
+		// Continue from where DynamoDB left off.
+		input.ExclusiveStartKey = output.LastEvaluatedKey
+	}
 }
 
 // Helper functions
