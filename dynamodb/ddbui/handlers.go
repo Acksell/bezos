@@ -17,12 +17,12 @@ import (
 
 // APIHandler provides REST API endpoints for DynamoDB operations.
 type APIHandler struct {
-	client ddbiface.AWSDynamoClientV2
+	client ddbiface.ReadWriteClient
 	schema *LoadedSchema
 }
 
 // NewAPIHandler creates a new API handler.
-func NewAPIHandler(client ddbiface.AWSDynamoClientV2, schema *LoadedSchema) *APIHandler {
+func NewAPIHandler(client ddbiface.ReadWriteClient, schema *LoadedSchema) *APIHandler {
 	return &APIHandler{
 		client: client,
 		schema: schema,

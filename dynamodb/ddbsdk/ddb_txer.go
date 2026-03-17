@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -17,7 +18,7 @@ type actionKey struct {
 	primaryKey table.PrimaryKey
 }
 
-func NewTx(ddb AWSDynamoClientV2, opts ...TxOption) Txer {
+func NewTx(ddb ddbiface.ReadWriteClient, opts ...TxOption) Txer {
 	tx := &txer{
 		awsddb:  ddb,
 		actions: make(map[actionKey]Action),
@@ -29,7 +30,7 @@ func NewTx(ddb AWSDynamoClientV2, opts ...TxOption) Txer {
 }
 
 type txer struct {
-	awsddb AWSDynamoClientV2
+	awsddb ddbiface.ReadWriteClient
 
 	opts txOpts
 

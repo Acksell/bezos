@@ -7,11 +7,12 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	dynamodbv2 "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-func NewBatcher(ddb AWSDynamoClientV2, opts ...BatchOption) *batcher {
+func NewBatcher(ddb ddbiface.ReadWriteClient, opts ...BatchOption) *batcher {
 	b := &batcher{
 		awsddb:  ddb,
 		pending: make(map[string][]types.WriteRequest),
@@ -27,7 +28,7 @@ func NewBatcher(ddb AWSDynamoClientV2, opts ...BatchOption) *batcher {
 }
 
 type batcher struct {
-	awsddb AWSDynamoClientV2
+	awsddb ddbiface.ReadWriteClient
 	opts   batchOpts
 
 	pending map[string][]types.WriteRequest

@@ -3,13 +3,8 @@ package ddbsdk
 import (
 	"context"
 
-	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
-
-// AWSDynamoClientV2 is an alias for ddbiface.AWSDynamoClientV2.
-// Deprecated: Import from github.com/acksell/bezos/dynamodb/ddbiface instead.
-type AWSDynamoClientV2 = ddbiface.AWSDynamoClientV2
 
 type IO interface {
 	Writer

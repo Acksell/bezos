@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -87,7 +88,7 @@ func (qd QueryDef) WithSKCondition(sk SortKeyCondition) QueryDef {
 // Querier executes DynamoDB queries with configurable options.
 // Create with [Client.NewQuery] or [NewQuerier], then configure with method chaining.
 type Querier struct {
-	awsddb AWSDynamoClientV2
+	awsddb ddbiface.ReadWriteClient
 
 	queryDef QueryDef
 
@@ -105,7 +106,7 @@ type Querier struct {
 const defaultPageSize = 10
 
 // NewQuerier creates a Querier from a QueryBuilder.
-func NewQuerier(ddb AWSDynamoClientV2, qb QueryBuilder) *Querier {
+func NewQuerier(ddb ddbiface.ReadWriteClient, qb QueryBuilder) *Querier {
 	return &Querier{
 		awsddb:   ddb,
 		queryDef: qb.Build(),

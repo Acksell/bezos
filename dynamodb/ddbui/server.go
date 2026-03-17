@@ -22,16 +22,16 @@ var staticFiles embed.FS
 // Server is the debug UI HTTP server.
 type Server struct {
 	port       int
-	client     ddbiface.AWSDynamoClientV2
+	client     ddbiface.ReadWriteClient
 	schema     *LoadedSchema
 	httpServer *http.Server
 }
 
 // NewServer creates a new debug UI server.
-// The client must implement the AWSDynamoClientV2 interface (e.g., *ddbstore.Store
+// The client must implement the ddbiface.ReadWriteClient interface (e.g., *ddbstore.Store
 // or the AWS SDK v2 *dynamodb.Client).
 // Multiple schemas can be passed and will be merged.
-func NewServer(client ddbiface.AWSDynamoClientV2, port int, schemas ...schema.Schema) (*Server, error) {
+func NewServer(client ddbiface.ReadWriteClient, port int, schemas ...schema.Schema) (*Server, error) {
 	if len(schemas) == 0 {
 		return nil, fmt.Errorf("at least one schema is required")
 	}

@@ -1,11 +1,12 @@
 package ddbsdk
 
 import (
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/acksell/bezos/dynamodb/ddbstore"
 	"github.com/acksell/bezos/dynamodb/table"
 )
 
-func NewClient(awsddb AWSDynamoClientV2) *Client {
+func NewClient(awsddb ddbiface.ReadWriteClient) *Client {
 	return &Client{
 		awsddb: awsddb,
 	}
@@ -28,7 +29,7 @@ func NewDiskClient(path string, defs ...table.TableDefinition) *Client {
 }
 
 type Client struct {
-	awsddb AWSDynamoClientV2
+	awsddb ddbiface.ReadWriteClient
 }
 
 var _ IO = &Client{}

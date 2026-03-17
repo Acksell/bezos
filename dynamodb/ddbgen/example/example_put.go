@@ -19,7 +19,7 @@ func main() {
 		Email:  "admin@example.com",
 		Name:   "John Doe",
 	}
-	var aws ddbsdk.AWSDynamoClientV2
+	var aws ddbiface.ReadWriteClient
 	db := ddbsdk.NewClient(aws) // won't work if ran, but illustrates usage of the generated code
 
 	ctx := context.Background()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/acksell/bezos/dynamodb/ddbiface"
 	"github.com/acksell/bezos/dynamodb/table"
 
 	expression2 "github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
@@ -12,14 +13,14 @@ import (
 )
 
 type getter struct {
-	awsddb AWSDynamoClientV2
+	awsddb ddbiface.ReadWriteClient
 
 	opts getOpts
 }
 
 var _ Getter = &getter{}
 
-func NewGetter(ddb AWSDynamoClientV2, opts ...GetOption) *getter {
+func NewGetter(ddb ddbiface.ReadWriteClient, opts ...GetOption) *getter {
 	g := &getter{
 		awsddb: ddb,
 	}
