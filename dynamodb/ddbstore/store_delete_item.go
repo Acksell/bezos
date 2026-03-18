@@ -39,11 +39,28 @@ func (s *Store) DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput
 	err = s.db.Update(func(txn *badger.Txn) error {
 		// Get existing item for return values and GSI cleanup
 		existingItem, err := txn.Get(key)
-		if err == badger.ErrKeyNotFound {
-			return nil // Nothing to delete
-		}
-		if err != nil {
+		if err != nil && err != badger.ErrKeyNotFound {
 			return err
+		}
+
+		if err == badger.ErrKeyNotFound {
+			// Item doesn't exist - evaluate condition against empty document
+			if params.ConditionExpression != nil {
+				input := conditionexpr.EvalInput{
+					ExpressionValues: params.ExpressionAttributeValues,
+					ExpressionNames:  params.ExpressionAttributeNames,
+				}
+				valid, err := conditionexpr.Eval(*params.ConditionExpression, input, nil)
+				if err != nil {
+					return fmt.Errorf("evaluate condition: %w", err)
+				}
+				if !valid {
+					return &types.ConditionalCheckFailedException{
+						Message: ptrStr("The conditional request failed"),
+					}
+				}
+			}
+			return nil // Nothing to delete
 		}
 
 		if err := existingItem.Value(func(val []byte) error {
