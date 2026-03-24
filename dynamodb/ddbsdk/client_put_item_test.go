@@ -128,25 +128,25 @@ func TestClient_SafePut_OptimisticLocking(t *testing.T) {
 	}
 	pk := testKey(entity.PK, entity.SK)
 
-	// First put succeeds
-	put := NewSafePut(clientTestTable, pk, entity)
+	// Create new item (nil old)
+	put := NewSafePut(clientTestTable, pk, nil, entity)
 	if err := db.PutItem(ctx, put); err != nil {
 		t.Fatalf("first put should succeed: %v", err)
 	}
 
-	// Put with higher version succeeds
-	entity.Version = 2
-	entity.Name = "Alice Updated"
-	put = NewSafePut(clientTestTable, pk, entity)
+	// Update with correct old version succeeds
+	old := &testEntity{PK: "user#1", SK: "profile", Name: "Alice", Version: 1}
+	updated := &testEntity{PK: "user#1", SK: "profile", Name: "Alice Updated", Version: 2}
+	put = NewSafePut(clientTestTable, pk, old, updated)
 	if err := db.PutItem(ctx, put); err != nil {
-		t.Fatalf("put with higher version should succeed: %v", err)
+		t.Fatalf("put with correct old version should succeed: %v", err)
 	}
 
-	// Put with same or lower version fails
-	entity.Version = 2
-	entity.Name = "Alice Updated Again"
-	put = NewSafePut(clientTestTable, pk, entity)
+	// Update with stale old version fails
+	staleOld := &testEntity{PK: "user#1", SK: "profile", Name: "Alice", Version: 1}
+	updated2 := &testEntity{PK: "user#1", SK: "profile", Name: "Alice Updated Again", Version: 3}
+	put = NewSafePut(clientTestTable, pk, staleOld, updated2)
 	if err := db.PutItem(ctx, put); err == nil {
-		t.Fatal("expected error when putting same version")
+		t.Fatal("expected error when old version doesn't match current")
 	}
 }

@@ -42,75 +42,111 @@ func TestSafePut_NewItem_Succeeds(t *testing.T) {
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
 	pk := testPrimaryKey(entity.PK, entity.SK)
 
-	put := NewSafePut(testTable, pk, entity)
+	// nil old means conditional create
+	put := NewSafePut(testTable, pk, nil, entity)
 	err := db.PutItem(ctx, put)
 	if err != nil {
 		t.Fatalf("expected no error for new item, got: %v", err)
 	}
 }
 
-func TestSafePut_SameVersion_Fails(t *testing.T) {
+func TestSafePut_CreateFailsIfItemExists(t *testing.T) {
 	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
 	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
 	pk := testPrimaryKey(entity.PK, entity.SK)
 
-	// First put succeeds
-	put := NewSafePut(testTable, pk, entity)
+	// First create succeeds
+	put := NewSafePut(testTable, pk, nil, entity)
 	if err := db.PutItem(ctx, put); err != nil {
-		t.Fatalf("first put should succeed: %v", err)
+		t.Fatalf("first create should succeed: %v", err)
 	}
 
-	// Same version should fail
-	put = NewSafePut(testTable, pk, entity)
+	// Second create with nil old should fail (item already exists)
+	entity2 := &versionedEntity{PK: "user#1", SK: "profile", Name: "Bob", Ver: 1}
+	put = NewSafePut(testTable, pk, nil, entity2)
 	err := db.PutItem(ctx, put)
 	if err == nil {
-		t.Fatal("expected error when putting same version, got nil")
+		t.Fatal("expected error when creating item that already exists, got nil")
 	}
 }
 
-func TestSafePut_LowerVersion_Fails(t *testing.T) {
+func TestSafePut_CorrectOldVersion_Succeeds(t *testing.T) {
 	db := NewMemoryClient(testTable)
 	ctx := context.Background()
 
-	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 2}
-	pk := testPrimaryKey(entity.PK, entity.SK)
+	old := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
+	pk := testPrimaryKey(old.PK, old.SK)
 
-	// Put version 2
-	put := NewSafePut(testTable, pk, entity)
+	// Insert initial item
+	put := NewSafePut(testTable, pk, nil, old)
 	if err := db.PutItem(ctx, put); err != nil {
-		t.Fatalf("first put should succeed: %v", err)
+		t.Fatalf("initial create should succeed: %v", err)
 	}
 
-	// Try to put version 1 (lower)
-	entity.Ver = 1
-	put = NewSafePut(testTable, pk, entity)
-	err := db.PutItem(ctx, put)
-	if err == nil {
-		t.Fatal("expected error when putting lower version, got nil")
-	}
-}
-
-func TestSafePut_HigherVersion_Succeeds(t *testing.T) {
-	db := NewMemoryClient(testTable)
-	ctx := context.Background()
-
-	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
-	pk := testPrimaryKey(entity.PK, entity.SK)
-
-	// Put version 1
-	put := NewSafePut(testTable, pk, entity)
-	if err := db.PutItem(ctx, put); err != nil {
-		t.Fatalf("first put should succeed: %v", err)
-	}
-
-	// Put version 2 (higher)
-	entity.Ver = 2
-	entity.Name = "Alice Updated"
-	put = NewSafePut(testTable, pk, entity)
+	// Update with correct old version
+	new := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice Updated", Ver: 2}
+	put = NewSafePut(testTable, pk, old, new)
 	err := db.PutItem(ctx, put)
 	if err != nil {
-		t.Fatalf("expected higher version to succeed, got: %v", err)
+		t.Fatalf("expected update with correct old version to succeed, got: %v", err)
+	}
+}
+
+func TestSafePut_WrongOldVersion_Fails(t *testing.T) {
+	db := NewMemoryClient(testTable)
+	ctx := context.Background()
+
+	entity := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
+	pk := testPrimaryKey(entity.PK, entity.SK)
+
+	// Insert initial item
+	put := NewSafePut(testTable, pk, nil, entity)
+	if err := db.PutItem(ctx, put); err != nil {
+		t.Fatalf("initial create should succeed: %v", err)
+	}
+
+	// Try to update with wrong old version
+	wrongOld := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 99}
+	new := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice Updated", Ver: 2}
+	put = NewSafePut(testTable, pk, wrongOld, new)
+	err := db.PutItem(ctx, put)
+	if err == nil {
+		t.Fatal("expected error when old version doesn't match, got nil")
+	}
+}
+
+func TestSafePut_ConcurrentWriters_OnlyFirstSucceeds(t *testing.T) {
+	db := NewMemoryClient(testTable)
+	ctx := context.Background()
+
+	// Both writers read the same initial state
+	initial := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
+	pk := testPrimaryKey(initial.PK, initial.SK)
+
+	// Insert initial item
+	put := NewSafePut(testTable, pk, nil, initial)
+	if err := db.PutItem(ctx, put); err != nil {
+		t.Fatalf("initial create should succeed: %v", err)
+	}
+
+	// Both readers got version 1
+	oldFromReader1 := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
+	oldFromReader2 := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice", Ver: 1}
+
+	// Writer 1 updates to version 2
+	new1 := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice by Writer1", Ver: 2}
+	put = NewSafePut(testTable, pk, oldFromReader1, new1)
+	if err := db.PutItem(ctx, put); err != nil {
+		t.Fatalf("first writer should succeed: %v", err)
+	}
+
+	// Writer 2 also tries to update to version 2, using stale old version
+	new2 := &versionedEntity{PK: "user#1", SK: "profile", Name: "Alice by Writer2", Ver: 2}
+	put = NewSafePut(testTable, pk, oldFromReader2, new2)
+	err := db.PutItem(ctx, put)
+	if err == nil {
+		t.Fatal("second writer should fail because version in DB is now 2, not 1")
 	}
 }

@@ -81,11 +81,13 @@ func (idx *{{$idx.Name}}IndexUtil) UnsafePut(e *{{$idx.EntityType}}) *ddbsdk.Put
 }
 {{if $idx.IsVersioned}}
 // SafePut creates a Put operation with optimistic locking.
-func (idx *{{$idx.Name}}IndexUtil) SafePut(e *{{$idx.EntityType}}) *ddbsdk.PutWithCondition {
+// If old is nil, acts as a conditional create (fails if item already exists).
+// If old is non-nil, fails unless the existing item's version matches old's version.
+func (idx *{{$idx.Name}}IndexUtil) SafePut(old *{{$idx.EntityType}}, new *{{$idx.EntityType}}) *ddbsdk.PutWithCondition {
 	{{- if $idx.GSIs}}
-	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(new), old, new).WithGSIKeys(idx.GSIKeysFrom(new)...)
 	{{- else}}
-	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e)
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(new), old, new)
 	{{- end}}
 }
 {{end}}

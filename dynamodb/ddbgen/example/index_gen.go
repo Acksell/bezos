@@ -615,8 +615,10 @@ func (idx *UserIndexUtil) UnsafePut(e *User) *ddbsdk.Put {
 }
 
 // SafePut creates a Put operation with optimistic locking.
-func (idx *UserIndexUtil) SafePut(e *User) *ddbsdk.PutWithCondition {
-	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(e), e).WithGSIKeys(idx.GSIKeysFrom(e)...)
+// If old is nil, acts as a conditional create (fails if item already exists).
+// If old is non-nil, fails unless the existing item's version matches old's version.
+func (idx *UserIndexUtil) SafePut(old *User, new *User) *ddbsdk.PutWithCondition {
+	return ddbsdk.NewSafePut(idx.Definition().Table, idx.PrimaryKeyFrom(new), old, new).WithGSIKeys(idx.GSIKeysFrom(new)...)
 }
 
 // Delete creates a Delete operation.
