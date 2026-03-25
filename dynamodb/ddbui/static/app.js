@@ -245,6 +245,13 @@
                 if (banner) banner.style.display = 'block';
                 if (detail) {
                     const parts = [];
+                    if (state.serverInfo.accountId) {
+                        let acct = state.serverInfo.accountId;
+                        if (state.serverInfo.accountAlias) acct += ' / ' + state.serverInfo.accountAlias;
+                        parts.push(acct);
+                    } else if (state.serverInfo.accountAlias) {
+                        parts.push(state.serverInfo.accountAlias);
+                    }
                     if (state.serverInfo.region) parts.push(state.serverInfo.region);
                     if (state.serverInfo.profile) parts.push('profile: ' + state.serverInfo.profile);
                     if (state.serverInfo.endpoint) parts.push(state.serverInfo.endpoint);
@@ -260,10 +267,16 @@
     // Returns true if the user confirms the write, or if we're in local mode.
     function confirmAWSWrite(action) {
         if (!state.serverInfo || state.serverInfo.mode !== 'aws') return true;
+        const details = [];
+        if (state.serverInfo.accountAlias) {
+            details.push(state.serverInfo.accountAlias);
+        } else if (state.serverInfo.accountId) {
+            details.push(`account ${state.serverInfo.accountId}`);
+        }
+        if (state.serverInfo.region) details.push(state.serverInfo.region);
+        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
         return confirm(
-            `You are about to ${action} in AWS DynamoDB` +
-            (state.serverInfo.region ? ` (${state.serverInfo.region})` : '') +
-            `. This will modify real data. Continue?`
+            `You are about to ${action} in AWS DynamoDB${suffix}. This will modify real data. Continue?`
         );
     }
 
@@ -281,9 +294,17 @@
     // Render table list in sidebar with entities pre-loaded
     async function renderTableList() {
         const list = $('#table-list');
+
+        // Sort tables: tables with entities first, then alphabetically within each group
+        const sorted = [...state.tables].sort((a, b) => {
+            const aHas = (a.entityCount || 0) > 0 ? 0 : 1;
+            const bHas = (b.entityCount || 0) > 0 ? 0 : 1;
+            if (aHas !== bHas) return aHas - bHas;
+            return a.name.localeCompare(b.name);
+        });
         
         // First render table structure
-        list.innerHTML = state.tables.map(t => `
+        list.innerHTML = sorted.map(t => `
             <li class="table-item">
                 <a href="#" class="table-link" data-table="${t.name}">
                     ${t.name}
@@ -295,7 +316,7 @@
         `).join('');
         
         // Then load entities for each table
-        for (const t of state.tables) {
+        for (const t of sorted) {
             try {
                 const schema = await api.get(`/tables/${t.name}`);
                 const entityList = $(`#entities-${t.name}`);
@@ -2119,8 +2140,53 @@
 
     // --- End Query Filter Builder ---
 
+    // Filter sidebar table list based on search input
+    function filterTableList(query) {
+        const q = query.toLowerCase().trim();
+        const items = $$('#table-list .table-item');
+        items.forEach(item => {
+            if (!q) {
+                item.style.display = '';
+                // Show all entities
+                item.querySelectorAll('.entity-list li').forEach(li => li.style.display = '');
+                return;
+            }
+            const tableLink = item.querySelector('.table-link');
+            const tableName = (tableLink?.dataset.table || '').toLowerCase();
+            const entityLinks = item.querySelectorAll('.entity-link');
+            const entityNames = [...entityLinks].map(a => (a.dataset.entity || '').toLowerCase());
+
+            const tableMatches = tableName.includes(q);
+            const matchingEntities = entityNames.filter(e => e.includes(q));
+
+            if (tableMatches || matchingEntities.length > 0) {
+                item.style.display = '';
+                // If table name matches, show all entities; otherwise only matching ones
+                if (tableMatches) {
+                    item.querySelectorAll('.entity-list li').forEach(li => li.style.display = '');
+                } else {
+                    entityLinks.forEach(a => {
+                        const li = a.closest('li');
+                        if (li) {
+                            li.style.display = (a.dataset.entity || '').toLowerCase().includes(q) ? '' : 'none';
+                        }
+                    });
+                    // Also hide "No entities" / "Loading..." items when filtering
+                    item.querySelectorAll('.no-entities, .loading-entities').forEach(li => li.style.display = 'none');
+                }
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    }
+
     // Setup event listeners
     function setupEventListeners() {
+        // Table search filter
+        $('#table-search').addEventListener('input', (e) => {
+            filterTableList(e.target.value);
+        });
+
         // Table selection
         $('#table-list').addEventListener('click', (e) => {
             const entityLink = e.target.closest('a.entity-link');

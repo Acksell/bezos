@@ -29,6 +29,10 @@ type ServerMode struct {
 	Profile string
 	// Endpoint is a custom DynamoDB endpoint URL (optional).
 	Endpoint string
+	// AccountID is the AWS account ID (only set when IsAWS is true).
+	AccountID string
+	// AccountAlias is the IAM account alias / display name (optional).
+	AccountAlias string
 }
 
 // Server is the debug UI HTTP server.
@@ -146,6 +150,13 @@ func (s *Server) printBanner() {
 		}
 		if s.mode.Profile != "" {
 			fmt.Printf("║  Profile: %-52s║\n", s.mode.Profile)
+		}
+		if s.mode.AccountID != "" {
+			acct := s.mode.AccountID
+			if s.mode.AccountAlias != "" {
+				acct = fmt.Sprintf("%s (%s)", s.mode.AccountID, s.mode.AccountAlias)
+			}
+			fmt.Printf("║  Account: %-52s║\n", acct)
 		}
 		if s.mode.Endpoint != "" {
 			line := fmt.Sprintf("Endpoint: %s", s.mode.Endpoint)

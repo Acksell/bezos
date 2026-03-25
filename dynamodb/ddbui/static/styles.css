@@ -88,6 +88,27 @@ body {
     list-style: none;
 }
 
+/* Table search input */
+.table-search {
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text-primary);
+}
+
+.table-search:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.table-search::placeholder {
+    color: var(--text-secondary);
+}
+
 .table-list .table-item {
     margin-bottom: 0.25rem;
 }

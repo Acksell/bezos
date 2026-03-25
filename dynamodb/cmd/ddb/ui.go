@@ -209,11 +209,16 @@ func runUIAWS(serverPort int, region, profile, endpoint string) error {
 		displayRegion = client.Options().Region
 	}
 
+	// Resolve the AWS account ID and alias (best-effort, non-fatal).
+	accountInfo := getAWSAccountInfo(ctx, awsOpts)
+
 	mode := ddbui.ServerMode{
-		IsAWS:    true,
-		Region:   displayRegion,
-		Profile:  profile,
-		Endpoint: endpoint,
+		IsAWS:        true,
+		Region:       displayRegion,
+		Profile:      profile,
+		Endpoint:     endpoint,
+		AccountID:    accountInfo.AccountID,
+		AccountAlias: accountInfo.Alias,
 	}
 
 	server, err := ddbui.NewServer(client, serverPort, mode, schemas...)

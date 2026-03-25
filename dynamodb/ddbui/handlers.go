@@ -64,6 +64,12 @@ func (h *APIHandler) getInfo(w http.ResponseWriter, r *http.Request) {
 		if h.mode.Endpoint != "" {
 			info["endpoint"] = h.mode.Endpoint
 		}
+		if h.mode.AccountID != "" {
+			info["accountId"] = h.mode.AccountID
+		}
+		if h.mode.AccountAlias != "" {
+			info["accountAlias"] = h.mode.AccountAlias
+		}
 	}
 	writeJSON(w, http.StatusOK, info)
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
 // AWSOptions holds configuration for connecting to real AWS DynamoDB.
@@ -128,4 +130,45 @@ func describeTableToSchema(desc *types.TableDescription) schema.Table {
 	}
 
 	return t
+}
+
+// AWSAccountInfo holds the AWS account ID and alias (display name).
+type AWSAccountInfo struct {
+	AccountID string
+	Alias     string
+}
+
+// getAWSAccountInfo calls STS GetCallerIdentity for the account ID and
+// IAM ListAccountAliases for the account alias. Both are best-effort.
+func getAWSAccountInfo(ctx context.Context, opts AWSOptions) AWSAccountInfo {
+	var cfgOpts []func(*config.LoadOptions) error
+	if opts.Region != "" {
+		cfgOpts = append(cfgOpts, config.WithRegion(opts.Region))
+	}
+	if opts.Profile != "" {
+		cfgOpts = append(cfgOpts, config.WithSharedConfigProfile(opts.Profile))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, cfgOpts...)
+	if err != nil {
+		return AWSAccountInfo{}
+	}
+
+	var info AWSAccountInfo
+
+	// Account ID via STS
+	stsClient := sts.NewFromConfig(cfg)
+	stsOut, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err == nil && stsOut.Account != nil {
+		info.AccountID = *stsOut.Account
+	}
+
+	// Account alias via IAM (most accounts have at most one alias)
+	iamClient := iam.NewFromConfig(cfg)
+	iamOut, err := iamClient.ListAccountAliases(ctx, &iam.ListAccountAliasesInput{})
+	if err == nil && len(iamOut.AccountAliases) > 0 {
+		info.Alias = iamOut.AccountAliases[0]
+	}
+
+	return info
 }
