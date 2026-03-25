@@ -111,6 +111,7 @@ func Generate(opts GenerateOptions) error {
 	return nil
 }
 
+// todo (ae): wtf, do we really need reflection here? Perhaps isolate that to the indices API instead with a Fields().
 // entryToindexInfo converts an indices.Entry to indexInfo using reflection.
 // All the heavy reflection work happens here, keeping the indices package minimal.
 func entryToindexInfo(entry indices.Entry) (indexInfo, error) {

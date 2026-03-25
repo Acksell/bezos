@@ -30,6 +30,13 @@ var UserTable = table.TableDefinition{
 				SortKey:      table.KeyDef{Name: "gsi1sk", Kind: table.KeyKindS},
 			},
 		},
+		{
+			Name: "GSI2",
+			KeyDefinitions: table.PrimaryKeyDefinition{
+				PartitionKey: table.KeyDef{Name: "gsi2pk", Kind: table.KeyKindS},
+				SortKey:      table.KeyDef{Name: "gsi2sk", Kind: table.KeyKindS},
+			},
+		},
 	},
 }
 
@@ -42,6 +49,11 @@ func init() {
 			{
 				GSI:       UserTable.GSIs[0],
 				Partition: val.Fmt("EMAIL#{email}"),
+				Sort:      val.Fmt("USER#{id}").Ptr(),
+			},
+			{
+				GSI:       UserTable.GSIs[1],
+				Partition: val.Fmt("NAME#{name}"),
 				Sort:      val.Fmt("USER#{id}").Ptr(),
 			},
 		},

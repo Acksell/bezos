@@ -606,6 +606,13 @@ func (idx *UserIndexUtil) GSIKeysFrom(e *User) []table.PrimaryKey {
 				SortKey:      "USER#" + e.UserID,
 			},
 		},
+		{
+			Definition: idx.Definition().Secondary[1].KeyDefinition(),
+			Values: table.PrimaryKeyValues{
+				PartitionKey: "NAME#" + e.Name,
+				SortKey:      "USER#" + e.UserID,
+			},
+		},
 	}
 }
 
@@ -647,6 +654,17 @@ func (idx *UserIndexUtil) GSI1Key(email string, id string) table.PrimaryKey {
 		Definition: idx.Definition().Secondary[0].KeyDefinition(),
 		Values: table.PrimaryKeyValues{
 			PartitionKey: "EMAIL#" + email,
+			SortKey:      "USER#" + id,
+		},
+	}
+}
+
+// GSI2Key creates a key for querying the GSI2 GSI.
+func (idx *UserIndexUtil) GSI2Key(name string, id string) table.PrimaryKey {
+	return table.PrimaryKey{
+		Definition: idx.Definition().Secondary[1].KeyDefinition(),
+		Values: table.PrimaryKeyValues{
+			PartitionKey: "NAME#" + name,
 			SortKey:      "USER#" + id,
 		},
 	}
@@ -734,5 +752,69 @@ func (q UserGSI1Query) IdLessThan(id string) ddbsdk.QueryDef {
 
 // IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
 func (q UserGSI1Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("USER#" + id))
+}
+
+// -------------------------------------------------------------------------
+// UserIndexGSI2 - Query-only GSI Wrapper
+// -------------------------------------------------------------------------
+
+// UserIndexGSI2Util provides query methods for the GSI2 GSI.
+type UserIndexGSI2Util struct {
+	primary *UserIndexUtil
+}
+
+// UserIndexGSI2 is the query-only wrapper for the GSI2 GSI.
+var UserIndexGSI2 = UserIndexGSI2Util{primary: &UserIndex}
+
+// UserGSI2Query is a query builder for the GSI2 GSI.
+type UserGSI2Query struct {
+	idx *UserIndexGSI2Util
+	qd  ddbsdk.QueryDef
+}
+
+// QueryDef returns the underlying QueryDef, implementing ddbsdk.QueryDefinition.
+func (q UserGSI2Query) QueryDef() ddbsdk.QueryDef { return q.qd }
+
+// QueryPartition creates a query for the given partition key on the GSI2 GSI.
+func (idx UserIndexGSI2Util) QueryPartition(name string) UserGSI2Query {
+	return UserGSI2Query{
+		idx: &idx,
+		qd:  ddbsdk.QueryPartition(idx.primary.Definition().Table, "NAME#"+name).OnIndex("GSI2"),
+	}
+}
+
+// IdEquals adds a sort key equals condition and returns the final QueryDef.
+func (q UserGSI2Query) IdEquals(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Equals("USER#" + id))
+}
+
+// IdBeginsWith adds a sort key begins_with condition and returns the final QueryDef.
+func (q UserGSI2Query) IdBeginsWith(prefix string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.BeginsWith("USER#" + prefix))
+}
+
+// IdBetween adds a sort key between condition and returns the final QueryDef.
+func (q UserGSI2Query) IdBetween(idStart string, idEnd string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.Between("USER#"+idStart, "USER#"+idEnd))
+}
+
+// IdGreaterThan adds a sort key > condition and returns the final QueryDef.
+func (q UserGSI2Query) IdGreaterThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThan("USER#" + id))
+}
+
+// IdGreaterThanOrEqual adds a sort key >= condition and returns the final QueryDef.
+func (q UserGSI2Query) IdGreaterThanOrEqual(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.GreaterThanOrEqual("USER#" + id))
+}
+
+// IdLessThan adds a sort key < condition and returns the final QueryDef.
+func (q UserGSI2Query) IdLessThan(id string) ddbsdk.QueryDef {
+	return q.qd.WithSKCondition(ddbsdk.LessThan("USER#" + id))
+}
+
+// IdLessThanOrEqual adds a sort key <= condition and returns the final QueryDef.
+func (q UserGSI2Query) IdLessThanOrEqual(id string) ddbsdk.QueryDef {
 	return q.qd.WithSKCondition(ddbsdk.LessThanOrEqual("USER#" + id))
 }
