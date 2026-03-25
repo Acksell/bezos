@@ -19,18 +19,21 @@ import (
 type APIHandler struct {
 	client ddbiface.ReadWriteClient
 	schema *LoadedSchema
+	mode   ServerMode
 }
 
 // NewAPIHandler creates a new API handler.
-func NewAPIHandler(client ddbiface.ReadWriteClient, schema *LoadedSchema) *APIHandler {
+func NewAPIHandler(client ddbiface.ReadWriteClient, schema *LoadedSchema, mode ServerMode) *APIHandler {
 	return &APIHandler{
 		client: client,
 		schema: schema,
+		mode:   mode,
 	}
 }
 
 // RegisterRoutes registers all API routes on the given mux.
 func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/info", h.getInfo)
 	mux.HandleFunc("GET /api/tables", h.listTables)
 	mux.HandleFunc("GET /api/tables/{table}", h.getTable)
 	mux.HandleFunc("GET /api/tables/{table}/items", h.scanItems)
@@ -43,6 +46,26 @@ func (h *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tables/{table}/items/bulk-delete", h.bulkDeleteItems)
 	mux.HandleFunc("POST /api/tables/{table}/query", h.queryItems)
 	mux.HandleFunc("POST /api/tables/{table}/gsi/{gsi}/query", h.queryGSI)
+}
+
+// getInfo returns server mode information (local vs AWS).
+func (h *APIHandler) getInfo(w http.ResponseWriter, r *http.Request) {
+	info := map[string]any{
+		"mode": "local",
+	}
+	if h.mode.IsAWS {
+		info["mode"] = "aws"
+		if h.mode.Region != "" {
+			info["region"] = h.mode.Region
+		}
+		if h.mode.Profile != "" {
+			info["profile"] = h.mode.Profile
+		}
+		if h.mode.Endpoint != "" {
+			info["endpoint"] = h.mode.Endpoint
+		}
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 // listTables returns all available tables and their schemas.

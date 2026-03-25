@@ -19,9 +19,22 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
+// ServerMode describes the backend the UI is connected to.
+type ServerMode struct {
+	// IsAWS is true when connected to real AWS DynamoDB.
+	IsAWS bool
+	// Region is the AWS region (only set when IsAWS is true).
+	Region string
+	// Profile is the AWS profile name (only set when IsAWS is true).
+	Profile string
+	// Endpoint is a custom DynamoDB endpoint URL (optional).
+	Endpoint string
+}
+
 // Server is the debug UI HTTP server.
 type Server struct {
 	port       int
+	mode       ServerMode
 	client     ddbiface.ReadWriteClient
 	schema     *LoadedSchema
 	httpServer *http.Server
@@ -31,7 +44,7 @@ type Server struct {
 // The client must implement the ddbiface.ReadWriteClient interface (e.g., *ddbstore.Store
 // or the AWS SDK v2 *dynamodb.Client).
 // Multiple schemas can be passed and will be merged.
-func NewServer(client ddbiface.ReadWriteClient, port int, schemas ...schema.Schema) (*Server, error) {
+func NewServer(client ddbiface.ReadWriteClient, port int, mode ServerMode, schemas ...schema.Schema) (*Server, error) {
 	if len(schemas) == 0 {
 		return nil, fmt.Errorf("at least one schema is required")
 	}
@@ -43,6 +56,7 @@ func NewServer(client ddbiface.ReadWriteClient, port int, schemas ...schema.Sche
 
 	return &Server{
 		port:   port,
+		mode:   mode,
 		client: client,
 		schema: loaded,
 	}, nil
@@ -54,7 +68,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Register API handlers
-	apiHandler := NewAPIHandler(s.client, s.schema)
+	apiHandler := NewAPIHandler(s.client, s.schema, s.mode)
 	apiHandler.RegisterRoutes(mux)
 
 	// Serve static files
@@ -119,9 +133,25 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) printBanner() {
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                    DynamoDB Debug UI                         ║")
+	if s.mode.IsAWS {
+		fmt.Println("║              DynamoDB Debug UI  [AWS]                        ║")
+	} else {
+		fmt.Println("║                    DynamoDB Debug UI                         ║")
+	}
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Printf("║  URL: http://localhost:%-40d║\n", s.port)
+	if s.mode.IsAWS {
+		if s.mode.Region != "" {
+			fmt.Printf("║  Region: %-53s║\n", s.mode.Region)
+		}
+		if s.mode.Profile != "" {
+			fmt.Printf("║  Profile: %-52s║\n", s.mode.Profile)
+		}
+		if s.mode.Endpoint != "" {
+			line := fmt.Sprintf("Endpoint: %s", s.mode.Endpoint)
+			fmt.Printf("║  %-60s║\n", truncate(line, 60))
+		}
+	}
 	fmt.Println("╠══════════════════════════════════════════════════════════════╣")
 	fmt.Println("║  Tables:                                                     ║")
 	for name, t := range s.schema.Tables {

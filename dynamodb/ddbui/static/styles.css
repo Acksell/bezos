@@ -32,6 +32,24 @@ body {
     min-height: 100vh;
 }
 
+/* AWS Mode Banner */
+.aws-banner {
+    background: #7c2d12;
+    border-bottom: 1px solid #ea580c;
+    padding: 0.4rem 1.5rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #fed7aa;
+}
+
+.aws-banner + .app {
+    min-height: calc(100vh - 2rem);
+}
+
+.aws-banner-text strong {
+    color: #fff;
+}
+
 /* Sidebar */
 .sidebar {
     width: 260px;

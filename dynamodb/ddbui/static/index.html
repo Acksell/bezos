@@ -7,6 +7,11 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- AWS Mode Banner (hidden by default, shown by JS) -->
+    <div id="aws-banner" class="aws-banner" style="display: none;">
+        <span class="aws-banner-text">Connected to <strong>AWS DynamoDB</strong> <span id="aws-banner-detail"></span> &mdash; write operations affect real data</span>
+    </div>
+
     <div class="app">
         <aside class="sidebar">
             <div class="sidebar-header">

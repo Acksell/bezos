@@ -80,7 +80,7 @@ Usage:
 
 Commands:
   gen     Generate type-safe key constructors and schema files
-  ui      Start the local debugging UI
+  ui      Start the DynamoDB debug UI
 
 Examples:
   # Add to your entity package and run go generate:
@@ -92,6 +92,12 @@ Examples:
 
   # Start UI with in-memory database:
   ddb ui --memory
+
+  # Browse real AWS DynamoDB:
+  ddb ui --aws
+  ddb ui --aws --region us-east-1
+  ddb ui --aws --profile staging
+  ddb ui --endpoint http://localhost:8000
 
 Configuration (optional):
   Create ddb.ui.yaml for UI defaults:

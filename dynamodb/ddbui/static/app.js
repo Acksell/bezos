@@ -21,6 +21,7 @@
         queryFilterRows: [],     // server-side filter rows for query tab
         queryProjection: '',     // projection expression for query tab
         queryLastKey: null,      // pagination key for query results
+        serverInfo: null,        // { mode: "local" | "aws", region?, profile?, endpoint? }
     };
 
     // Per-table filter state cache: tableName -> { scanEntityFilter (Set), scanFilterRows, scanProjection }
@@ -229,8 +230,41 @@
 
     // Initialize
     async function init() {
+        await loadServerInfo();
         await loadTables();
         setupEventListeners();
+    }
+
+    // Load server info (mode: local or aws)
+    async function loadServerInfo() {
+        try {
+            state.serverInfo = await api.get('/info');
+            if (state.serverInfo.mode === 'aws') {
+                const banner = $('#aws-banner');
+                const detail = $('#aws-banner-detail');
+                if (banner) banner.style.display = 'block';
+                if (detail) {
+                    const parts = [];
+                    if (state.serverInfo.region) parts.push(state.serverInfo.region);
+                    if (state.serverInfo.profile) parts.push('profile: ' + state.serverInfo.profile);
+                    if (state.serverInfo.endpoint) parts.push(state.serverInfo.endpoint);
+                    detail.textContent = parts.length > 0 ? '(' + parts.join(', ') + ')' : '';
+                }
+            }
+        } catch (err) {
+            console.error('Failed to load server info:', err);
+            state.serverInfo = { mode: 'local' };
+        }
+    }
+
+    // Returns true if the user confirms the write, or if we're in local mode.
+    function confirmAWSWrite(action) {
+        if (!state.serverInfo || state.serverInfo.mode !== 'aws') return true;
+        return confirm(
+            `You are about to ${action} in AWS DynamoDB` +
+            (state.serverInfo.region ? ` (${state.serverInfo.region})` : '') +
+            `. This will modify real data. Continue?`
+        );
     }
 
     // Load tables list
@@ -1273,7 +1307,12 @@
         if (state.selectedIndices.size === 0) return;
         
         const count = state.selectedIndices.size;
-        if (!confirm(`Are you sure you want to delete ${count} item(s)?`)) {
+        if (!confirmAWSWrite(`delete ${count} item(s)`)) {
+            return;
+        }
+        
+        // Additional non-AWS confirmation (keep original behavior)
+        if (state.serverInfo?.mode !== 'aws' && !confirm(`Are you sure you want to delete ${count} item(s)?`)) {
             return;
         }
         
@@ -1434,6 +1473,8 @@
             return;
         }
 
+        if (!confirmAWSWrite('save an item')) return;
+
         try {
             await api.post(`/tables/${state.currentTable}/items`, { item });
             closeItemModal();
@@ -1464,7 +1505,12 @@
             return;
         }
 
-        if (!confirm('Are you sure you want to delete this item?')) {
+        if (!confirmAWSWrite('delete an item')) {
+            return;
+        }
+
+        // Additional non-AWS confirmation (keep original behavior)
+        if (state.serverInfo?.mode !== 'aws' && !confirm('Are you sure you want to delete this item?')) {
             return;
         }
 
@@ -1618,7 +1664,12 @@
         if (state.selectedQueryIndices.size === 0) return;
         
         const count = state.selectedQueryIndices.size;
-        if (!confirm(`Are you sure you want to delete ${count} item(s)?`)) {
+        if (!confirmAWSWrite(`delete ${count} item(s)`)) {
+            return;
+        }
+        
+        // Additional non-AWS confirmation (keep original behavior)
+        if (state.serverInfo?.mode !== 'aws' && !confirm(`Are you sure you want to delete ${count} item(s)?`)) {
             return;
         }
         
