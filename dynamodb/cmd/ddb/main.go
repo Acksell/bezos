@@ -54,6 +54,14 @@ func main() {
 		err = runGen()
 	case "ui", "serve":
 		err = runUI()
+	case "schema":
+		err = runSchema()
+	case "get":
+		err = runGet()
+	case "query":
+		err = runQuery()
+	case "scan":
+		err = runScan()
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -81,29 +89,28 @@ Usage:
 Commands:
   gen     Generate type-safe key constructors and schema files
   ui      Start the DynamoDB debug UI
+  schema  Inspect schema definitions (tables, entities, keys)
+  get     Get an item by entity type and key fields
+  query   Query items by entity type and key conditions
+  scan    Scan items by entity type
 
 Examples:
-  # Add to your entity package and run go generate:
-  //go:generate ddb gen
-  go generate ./...
+  # Code generation:
+  ddb gen
 
-  # Start UI with local database:
+  # Schema introspection:
+  ddb schema tables
+  ddb schema describe User
+
+  # Data operations (defaults to AWS):
+  ddb get User id=abc123
+  ddb query Order tenantID=tenant-42
+  ddb query User --gsi GSI1 email=foo@bar.com
+  ddb scan User --limit 10
+
+  # Start UI:
   ddb ui --db ./data
-
-  # Start UI with in-memory database:
-  ddb ui --memory
-
-  # Browse real AWS DynamoDB:
   ddb ui --aws
-  ddb ui --aws --region us-east-1
-  ddb ui --aws --profile staging
-  ddb ui --endpoint http://localhost:8000
-
-Configuration (optional):
-  Create ddb.ui.yaml for UI defaults:
-
-    dataDir: ./data    # database directory
-    port: 3070         # UI server port
 
 Run 'ddb <command> --help' for more information on a command.`)
 }
